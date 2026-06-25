@@ -188,6 +188,8 @@ def build_qss(theme_id):
     table_bg = _darken(surface, 0.18)
     accent_hover = _lighten(accent, 0.14)
     disabled = _mix(muted, bg, 0.5)
+    scroll_handle = _lighten(surface, 0.20)
+    scroll_handle_hover = _lighten(surface, 0.34)
     check_icon = _check_icon(accent_text)
 
     return f"""
@@ -250,6 +252,26 @@ QMenu {{ background: {surface}; color: {text}; border: 1px solid {border}; }}
 QMenu::item:selected {{ background: {accent}; color: {accent_text}; }}
 QDialog {{ background: {bg}; }}
 QScrollArea {{ border: none; }}
+QScrollBar:vertical {{
+    background: transparent; width: 12px; margin: 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: {scroll_handle}; min-height: 30px;
+    border-radius: 5px; margin: 0 1px;
+}}
+QScrollBar::handle:vertical:hover {{ background: {scroll_handle_hover}; }}
+QScrollBar:horizontal {{
+    background: transparent; height: 12px; margin: 2px;
+}}
+QScrollBar::handle:horizontal {{
+    background: {scroll_handle}; min-width: 30px;
+    border-radius: 5px; margin: 1px 0;
+}}
+QScrollBar::handle:horizontal:hover {{ background: {scroll_handle_hover}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{
+    width: 0; height: 0; background: none; border: none;
+}}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QSpinBox, QDoubleSpinBox {{
     background: {surface}; border: 1px solid {border}; border-radius: 6px;
     padding: 4px 8px; color: {text};
