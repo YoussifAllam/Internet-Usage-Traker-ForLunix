@@ -6,6 +6,11 @@ anchors, so a palette only needs a handful of values. ``swatches`` is the list
 of colors shown on the theme's card in the Settings tab.
 """
 
+import os
+import tempfile
+
+_ICON_DIR = os.path.join(tempfile.gettempdir(), "nettracker-icons")
+
 
 def _clamp(v):
     return max(0, min(255, int(round(v))))
@@ -33,6 +38,36 @@ def _lighten(h, t):
 
 def _darken(h, t):
     return _mix(h, "#000000", t)
+
+
+def _check_icon(color):
+    """Render (and cache) a checkmark PNG in ``color`` for the checkbox tick,
+    returning its path. Returns '' if no GUI app exists yet (e.g. in tests),
+    leaving the checked box a solid accent fill."""
+    from PyQt5.QtWidgets import QApplication
+
+    if QApplication.instance() is None:
+        return ""
+    path = os.path.join(_ICON_DIR, "check-%s.png" % color.lstrip("#"))
+    if os.path.exists(path):
+        return path
+
+    from PyQt5.QtCore import QPointF, Qt
+    from PyQt5.QtGui import QColor, QPainter, QPen, QPixmap
+
+    os.makedirs(_ICON_DIR, exist_ok=True)
+    pix = QPixmap(16, 16)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color), 2.2)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.drawPolyline(QPointF(3.5, 8.5), QPointF(6.5, 11.5), QPointF(12.5, 4.5))
+    p.end()
+    pix.save(path, "PNG")
+    return path
 
 
 # Anchor colors per theme. Derived shades are computed in build_qss().
@@ -153,6 +188,7 @@ def build_qss(theme_id):
     table_bg = _darken(surface, 0.18)
     accent_hover = _lighten(accent, 0.14)
     disabled = _mix(muted, bg, 0.5)
+    check_icon = _check_icon(accent_text)
 
     return f"""
 QMainWindow, QWidget {{ background: {bg}; color: {text}; }}
@@ -167,7 +203,15 @@ QComboBox {{
     background: {surface}; border: 1px solid {border}; border-radius: 6px;
     padding: 5px 10px; min-width: 130px;
 }}
-QComboBox::drop-down {{ border: none; }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: center right;
+    width: 22px; border: none;
+}}
+QComboBox::down-arrow {{
+    width: 0; height: 0; margin-right: 8px;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid {muted};
+}}
 QComboBox QAbstractItemView {{
     background: {surface}; selection-background-color: {accent};
     selection-color: {accent_text}; border: 1px solid {border};
@@ -203,5 +247,38 @@ QSpinBox, QDoubleSpinBox {{
     background: {surface}; border: 1px solid {border}; border-radius: 6px;
     padding: 4px 8px; color: {text};
 }}
-QCheckBox {{ color: {text}; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border; subcontrol-position: top right; width: 18px;
+    border-left: 1px solid {border}; border-top-right-radius: 6px;
+    background: {button};
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
+    border-left: 1px solid {border}; border-bottom-right-radius: 6px;
+    background: {button};
+}}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {button_hover};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-bottom: 5px solid {muted};
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 5px solid {muted};
+}}
+QCheckBox {{ color: {text}; spacing: 8px; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border-radius: 4px;
+    border: 1px solid {border}; background: {surface};
+}}
+QCheckBox::indicator:hover {{ border-color: {muted}; }}
+QCheckBox::indicator:checked {{
+    background: {accent}; border-color: {accent};
+    image: url("{check_icon}");
+}}
 """
