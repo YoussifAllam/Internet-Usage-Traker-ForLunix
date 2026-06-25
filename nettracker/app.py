@@ -31,7 +31,14 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from . import autostart, export, sources, themes
+from . import (
+    autostart,
+    connections,
+    export,
+    network,
+    sources,
+    themes,
+)
 from .nethogs import (
     NethogsMonitor,
     grant_capabilities,
@@ -1096,6 +1103,166 @@ class AppDetailDialog(QDialog):
         lay.addWidget(legend, alignment=Qt.AlignRight)
 
 
+class NetworksTab(QWidget):
+    """Usage per network (Wi-Fi SSID / wired link), with a metered flag."""
+
+    def __init__(self, usage, settings):
+        super().__init__()
+        self.usage = usage
+        self.settings = settings
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        top = QHBoxLayout()
+        title = QLabel("Usage by Network")
+        title.setObjectName("h1")
+        top.addWidget(title)
+        top.addStretch(1)
+        top.addWidget(QLabel("Period:"))
+        self.period = QComboBox()
+        self.period.addItem("Today", "day")
+        self.period.addItem("This month", "month")
+        self.period.currentIndexChanged.connect(self.reload)
+        top.addWidget(self.period)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.reload)
+        top.addWidget(self.refresh_btn)
+        root.addLayout(top)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(
+            ["Network", "Download", "Upload", "Total"]
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.cellClicked.connect(self._toggle_metered)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        root.addWidget(self.table, stretch=1)
+
+        self.note = QLabel(
+            "Counts usage since first run, split by the network you were on. "
+            "Click a row to flag it as metered (e.g. a phone hotspot)."
+        )
+        self.note.setObjectName("muted")
+        self.note.setWordWrap(True)
+        root.addWidget(self.note)
+
+    def _metered(self):
+        return set(self.settings.get("metered_networks") or [])
+
+    def reload(self):
+        rows = self.usage.net_totals(self.period.currentData())
+        metered = self._metered()
+        self.table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            tag = "  ⚠ metered" if r["network"] in metered else ""
+            self.table.setItem(i, 0, _cell(r["network"] + tag))
+            self.table.setItem(
+                i, 1, _cell(human_bytes(r["rx"]), RX_COLOR,
+                            Qt.AlignRight | Qt.AlignVCenter))
+            self.table.setItem(
+                i, 2, _cell(human_bytes(r["tx"]), TX_COLOR,
+                            Qt.AlignRight | Qt.AlignVCenter))
+            self.table.setItem(
+                i, 3, _cell(human_bytes(r["total"]),
+                            align=Qt.AlignRight | Qt.AlignVCenter))
+
+    def _toggle_metered(self, row, _col):
+        item = self.table.item(row, 0)
+        if item is None:
+            return
+        name = item.text().replace("  ⚠ metered", "")
+        metered = self._metered()
+        if name in metered:
+            metered.discard(name)
+        else:
+            metered.add(name)
+        self.settings.set("metered_networks", sorted(metered))
+        self.reload()
+
+    def showEvent(self, event):
+        self.reload()
+        super().showEvent(event)
+
+
+class ConnectionsTab(QWidget):
+    """Live remote endpoints per app, from `ss`. Refreshes while visible."""
+
+    def __init__(self):
+        super().__init__()
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        top = QHBoxLayout()
+        title = QLabel("Connections")
+        title.setObjectName("h1")
+        top.addWidget(title)
+        top.addStretch(1)
+        self.count = QLabel("")
+        self.count.setObjectName("muted")
+        top.addWidget(self.count)
+        root.addLayout(top)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ["App", "PID", "Proto", "Remote", "Local"]
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        root.addWidget(self.table, stretch=1)
+
+        self.note = QLabel(
+            "Established connections for your own processes (via ss). "
+            "Remote is the host:port your machine is talking to."
+        )
+        self.note.setObjectName("muted")
+        self.note.setWordWrap(True)
+        root.addWidget(self.note)
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(3000)
+        self.timer.timeout.connect(self.reload)
+
+    def reload(self):
+        if not connections.ss_available():
+            self.count.setText("ss is not installed")
+            return
+        rows = connections.list_connections()
+        self.count.setText(f"{len(rows)} active")
+        self.table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            self.table.setItem(i, 0, _cell(r["app"]))
+            self.table.setItem(i, 1, _cell(r["pid"], align=Qt.AlignCenter))
+            self.table.setItem(i, 2, _cell(r["proto"], align=Qt.AlignCenter))
+            self.table.setItem(i, 3, _cell(f"{r['raddr']}:{r['rport']}"))
+            self.table.setItem(i, 4, _cell(r["laddr"]))
+
+    def showEvent(self, event):
+        self.reload()
+        self.timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1116,12 +1283,16 @@ class MainWindow(QMainWindow):
         self.live = LiveTab()
         self.history = HistoryTab(self.settings)
         self.apps = AppsTab(self.usage)
+        self.networks = NetworksTab(self.usage, self.settings)
         self.process = ProcessTab()
+        self.conns = ConnectionsTab()
         self.settings_tab = SettingsTab(self.settings)
         self.tabs.addTab(self.live, "Live")
         self.tabs.addTab(self.history, "History")
         self.tabs.addTab(self.apps, "Apps")
+        self.tabs.addTab(self.networks, "Networks")
         self.tabs.addTab(self.process, "Processes")
+        self.tabs.addTab(self.conns, "Connections")
         self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
@@ -1167,6 +1338,32 @@ class MainWindow(QMainWindow):
         self.cap_timer.setInterval(120_000)
         self.cap_timer.timeout.connect(self.history.reload)
         self.cap_timer.start()
+
+        # Per-network usage sampler: attribute /sys counter deltas to the
+        # network (SSID / wired link) active on each interface.
+        self._net_prev = {}
+        self.net_timer = QTimer(self)
+        self.net_timer.setInterval(15_000)
+        self.net_timer.timeout.connect(self._sample_networks)
+        self._sample_networks()  # seed baselines
+        self.net_timer.start()
+
+    def _sample_networks(self):
+        for info in sources.list_interfaces():
+            iface = info["name"]
+            rx, tx = sources.read_counters(iface)
+            if rx is None:
+                continue
+            prev = self._net_prev.get(iface)
+            self._net_prev[iface] = (rx, tx)
+            if prev is None:
+                continue
+            drx, dtx = rx - prev[0], tx - prev[1]
+            if drx < 0 or dtx < 0:  # counter reset (reboot / iface down)
+                continue
+            if drx or dtx:
+                self.usage.add_net(network.network_for(iface), drx, dtx)
+        self.usage.commit()
 
     # ---- menu & tray -------------------------------------------------
 

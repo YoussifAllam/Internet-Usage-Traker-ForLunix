@@ -20,7 +20,12 @@ a **system tray**, and **six color themes**, in a clean UI.
   the `vnstat` database.
 - **Apps** — per-app usage **totals** for today / this month. **Double-click any
   app** to open its **14-day daily-usage trend**.
+- **Networks** — usage split **per network** (Wi-Fi SSID or wired link), so a
+  metered phone hotspot stays separate from home Wi-Fi. Click a row to flag it
+  as **metered**.
 - **Processes** — live per-process download/upload **rates** via `nethogs`.
+- **Connections** — live table of the remote **hosts/ports each app is talking
+  to** right now (via `ss`), so you can see who your machine is connecting to.
 - **One interface selector** — a single **Interface** dropdown in the tab-bar
   corner drives every tab, including a **Total (all)** option that combines all
   interfaces.
@@ -56,9 +61,11 @@ a **system tray**, and **six color themes**, in a clean UI.
 | ![Apps](docs/screenshot-apps.png) | ![Settings](docs/screenshot-settings.png) |
 
 <details>
-<summary>More — History, Processes &amp; per-app trend</summary>
+<summary>More — History, Networks, Connections, Processes &amp; per-app trend</summary>
 
 ![History](docs/screenshot-history.png)
+![Networks](docs/screenshot-networks.png)
+![Connections](docs/screenshot-connections.png)
 ![Processes](docs/screenshot-processes.png)
 ![Per-app daily trend](docs/screenshot-appdetail.png)
 
@@ -108,6 +115,16 @@ pip install -r requirements.txt
 
 `run.sh` uses `$PYTHON` if set, otherwise falls back to `python3`.
 
+### Install into the application menu
+
+```bash
+./install.sh      # adds a NetTracker entry + icon to your app launcher
+./uninstall.sh    # removes it (keeps your data and settings)
+```
+
+A [Flatpak manifest](packaging/) is included as a starting point for sandboxed
+builds (`flatpak-builder`).
+
 ## Per-app / per-process access
 
 `nethogs` needs elevated capabilities to capture packets. The **Apps** and
@@ -152,7 +169,9 @@ NetTracker.
 | `nettracker/app.py` | Main window, tabs, tray, menus, data-cap & alert logic |
 | `nettracker/sources.py` | Interfaces, `/sys` counters, vnstat JSON, billing cycle, merge |
 | `nettracker/nethogs.py` | nethogs monitor (QProcess) + capability handling |
-| `nettracker/usagedb.py` | SQLite per-app usage accumulator |
+| `nettracker/connections.py` | Live per-process connections, parsed from `ss` |
+| `nettracker/network.py` | Wi-Fi SSID / wired link detection |
+| `nettracker/usagedb.py` | SQLite per-app and per-network usage accumulator |
 | `nettracker/widgets.py` | `LiveGraph`, `BarChart`, `CapBar`, icon (QPainter) |
 | `nettracker/themes.py` | Color palettes and stylesheet generation |
 | `nettracker/settings.py` | Persistent JSON settings |
