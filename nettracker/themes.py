@@ -191,8 +191,15 @@ def build_qss(theme_id):
     check_icon = _check_icon(accent_text)
 
     return f"""
-QMainWindow, QWidget {{ background: {bg}; color: {text}; }}
-QTabWidget::pane {{ border: 1px solid {border}; border-radius: 8px; top: -1px; }}
+QWidget {{ color: {text}; }}
+QMainWindow, QDialog {{ background: {bg}; }}
+QTabWidget::pane {{
+    background: {bg}; border: 1px solid {border}; border-radius: 8px; top: -1px;
+}}
+/* Paint the structural containers only — tab pages and the scroll viewport —
+   so generic row/label widgets inside cards stay transparent (no banding). */
+QStackedWidget > QWidget {{ background: {bg}; }}
+QScrollArea > QWidget, QScrollArea > QWidget > QWidget {{ background: {bg}; }}
 QTabBar::tab {{
     background: {surface}; color: {muted}; padding: 8px 18px;
     border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px;
