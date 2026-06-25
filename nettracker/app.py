@@ -268,7 +268,17 @@ class HistoryTab(QWidget):
         self.settings = settings
         self._days = []
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+
+        body = QWidget()
+        scroll.setWidget(body)
+        root = QVBoxLayout(body)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(14)
 
@@ -1157,18 +1167,6 @@ class MainWindow(QMainWindow):
         self.cap_timer.setInterval(120_000)
         self.cap_timer.timeout.connect(self.history.reload)
         self.cap_timer.start()
-
-        self._center_on_screen()
-
-    def _center_on_screen(self):
-        """Open centered on the active screen so the window can't land partly
-        off the edge (which would clip the menu bar / left-aligned content)."""
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is None:
-            return
-        geo = self.frameGeometry()
-        geo.moveCenter(screen.availableGeometry().center())
-        self.move(geo.topLeft())
 
     # ---- menu & tray -------------------------------------------------
 
