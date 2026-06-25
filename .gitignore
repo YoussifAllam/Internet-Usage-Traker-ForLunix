@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+
+# App runtime data (kept in XDG dirs, never in-repo)
+*.db
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
