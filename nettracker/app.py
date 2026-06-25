@@ -6,15 +6,11 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QAction,
-    QActionGroup,
     QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -23,6 +19,7 @@ from PyQt5.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSystemTrayIcon,
     QTableWidget,
@@ -412,87 +409,247 @@ class HistoryTab(QWidget):
             self.status.setText(f"Export failed: {exc}")
 
 
-class CapDialog(QDialog):
-    def __init__(self, settings, parent=None):
-        super().__init__(parent)
+class SettingsTab(QWidget):
+    """All app settings on one page, each with a short hint. Applies live."""
+
+    rate_unit_changed = pyqtSignal(str)
+    cap_settings_changed = pyqtSignal()
+    track_apps_changed = pyqtSignal(bool)
+    autostart_changed = pyqtSignal(bool)
+
+    def __init__(self, settings):
+        super().__init__()
         self.settings = settings
-        self.setWindowTitle("Data cap & alerts")
-        self.setStyleSheet(STYLE)
-        self.setMinimumWidth(430)
+        self._loading = True
 
-        form = QFormLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
 
-        cap_head = QLabel("Monthly cap")
-        cap_head.setObjectName("muted")
-        form.addRow(cap_head)
-        self.enable = QCheckBox("Enable monthly cap")
-        self.enable.setChecked(bool(settings.get("cap_enabled")))
-        form.addRow(self.enable)
+        body = QWidget()
+        scroll.setWidget(body)
+        root = QVBoxLayout(body)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(14)
 
-        self.limit = QDoubleSpinBox()
-        self.limit.setRange(0.1, 1_000_000.0)
-        self.limit.setDecimals(1)
-        self.limit.setSuffix(" GB")
-        self.limit.setValue(float(settings.get("cap_limit_gb")))
-        form.addRow("Limit:", self.limit)
+        title = QLabel("Settings")
+        title.setObjectName("h1")
+        root.addWidget(title)
 
-        self.day = QSpinBox()
-        self.day.setRange(1, 28)
-        self.day.setValue(int(settings.get("cap_billing_day")))
-        form.addRow("Billing day:", self.day)
+        # ---- Display ----
+        card, lay = self._section("Display")
+        self.units = QComboBox()
+        self.units.addItem("Bytes per second (KiB/s, MiB/s)", "bytes")
+        self.units.addItem("Bits per second (Mbps)", "bits")
+        self.units.currentIndexChanged.connect(self._on_units)
+        lay.addWidget(self._row("Speed units", self.units))
+        lay.addWidget(self._hint(
+            "How live download/upload speeds are shown. Bytes/s reflects file "
+            "size; bits/s (Mbps) matches the numbers ISPs advertise."
+        ))
+        root.addWidget(card)
 
-        alert_head = QLabel("Usage alerts")
-        alert_head.setObjectName("muted")
-        form.addRow(QLabel(""))
-        form.addRow(alert_head)
+        # ---- Per-app tracking ----
+        card, lay = self._section("Per-app tracking")
+        self.track = QCheckBox("Track per-app usage in the background")
+        self.track.toggled.connect(self._on_track)
+        lay.addWidget(self.track)
+        lay.addWidget(self._hint(
+            "Quietly runs nethogs to record how much each app uploads and "
+            "downloads — the totals you see in the Apps tab. Requires the "
+            "one-time access grant on the Processes tab."
+        ))
+        root.addWidget(card)
 
-        self.daily_enable = QCheckBox("Alert when today's total exceeds")
-        self.daily_enable.setChecked(bool(settings.get("daily_alert_enabled")))
-        self.daily_gb = QDoubleSpinBox()
-        self.daily_gb.setRange(0.1, 100_000.0)
-        self.daily_gb.setDecimals(1)
-        self.daily_gb.setSuffix(" GB")
-        self.daily_gb.setValue(float(settings.get("daily_alert_gb")))
-        form.addRow(self._alert_row(self.daily_enable, self.daily_gb))
+        # ---- Monthly data cap ----
+        card, lay = self._section("Monthly data cap")
+        self.cap_enable = QCheckBox("Enable a monthly data cap")
+        self.cap_enable.toggled.connect(self._on_cap)
+        lay.addWidget(self.cap_enable)
+        lay.addWidget(self._hint(
+            "Track usage against a monthly allowance. The History tab shows a "
+            "progress bar and a forecast of when you'll reach it."
+        ))
+        self.cap_limit = QDoubleSpinBox()
+        self.cap_limit.setRange(0.1, 1_000_000.0)
+        self.cap_limit.setDecimals(1)
+        self.cap_limit.setSuffix(" GB")
+        self.cap_limit.valueChanged.connect(self._on_cap)
+        lay.addWidget(self._row("Limit", self.cap_limit))
+        lay.addWidget(self._hint("Your plan's monthly data allowance, in gigabytes."))
+        self.cap_day = QSpinBox()
+        self.cap_day.setRange(1, 28)
+        self.cap_day.valueChanged.connect(self._on_cap)
+        lay.addWidget(self._row("Billing day", self.cap_day))
+        lay.addWidget(self._hint(
+            "The day each month your billing cycle resets (1–28). Usage is "
+            "counted from this day."
+        ))
+        root.addWidget(card)
 
-        self.app_enable = QCheckBox("Alert when any app today exceeds")
-        self.app_enable.setChecked(bool(settings.get("app_alert_enabled")))
-        self.app_gb = QDoubleSpinBox()
-        self.app_gb.setRange(0.1, 100_000.0)
-        self.app_gb.setDecimals(1)
-        self.app_gb.setSuffix(" GB")
-        self.app_gb.setValue(float(settings.get("app_alert_gb")))
-        form.addRow(self._alert_row(self.app_enable, self.app_gb))
+        # ---- Usage alerts ----
+        card, lay = self._section("Usage alerts")
+        self.daily_enable = QCheckBox("Alert on high daily usage above")
+        self.daily_enable.toggled.connect(self._on_cap)
+        self.daily_gb = self._gb_spin()
+        lay.addWidget(self._row2(self.daily_enable, self.daily_gb))
+        lay.addWidget(self._hint(
+            "Sends a notification once a day when today's total usage passes "
+            "this many gigabytes."
+        ))
+        self.app_enable = QCheckBox("Alert on heavy app usage above")
+        self.app_enable.toggled.connect(self._on_cap)
+        self.app_gb = self._gb_spin()
+        lay.addWidget(self._row2(self.app_enable, self.app_gb))
+        lay.addWidget(self._hint(
+            "Notifies you when any single app passes this many gigabytes today "
+            "(needs per-app tracking on)."
+        ))
+        root.addWidget(card)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
+        # ---- Startup & tray ----
+        card, lay = self._section("Startup & tray")
+        self.autostart = QCheckBox("Launch NetTracker on login")
+        self.autostart.toggled.connect(self._on_autostart)
+        lay.addWidget(self.autostart)
+        lay.addWidget(self._hint(
+            "Starts automatically when you log in, so usage is tracked "
+            "continuously without opening it by hand."
+        ))
+        self.start_min = QCheckBox("Start minimized to the tray")
+        self.start_min.toggled.connect(
+            lambda v: self._save("start_minimized", v)
+        )
+        lay.addWidget(self.start_min)
+        lay.addWidget(self._hint(
+            "Opens hidden in the system tray instead of showing the window. "
+            "Click the tray icon to bring it up."
+        ))
+        self.close_tray = QCheckBox("Keep running in the tray when closed")
+        self.close_tray.toggled.connect(
+            lambda v: self._save("close_to_tray", v)
+        )
+        lay.addWidget(self.close_tray)
+        lay.addWidget(self._hint(
+            "Closing the window hides it to the tray instead of quitting. Use "
+            "File ▸ Quit or the tray menu to exit completely."
+        ))
+        root.addWidget(card)
 
-    @staticmethod
-    def _alert_row(checkbox, spin):
+        root.addStretch(1)
+        self._load()
+        self._loading = False
+
+    # ---- layout helpers ----
+
+    def _section(self, title):
+        card = QFrame()
+        card.setObjectName("card")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(16, 12, 16, 14)
+        lay.setSpacing(6)
+        head = QLabel(title)
+        f = QFont()
+        f.setBold(True)
+        head.setFont(f)
+        lay.addWidget(head)
+        return card, lay
+
+    def _hint(self, text):
+        lbl = QLabel(text)
+        lbl.setObjectName("muted")
+        lbl.setWordWrap(True)
+        return lbl
+
+    def _row(self, label, widget):
         box = QWidget()
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
-        spin.setMaximumWidth(120)
-        lay.addWidget(checkbox, stretch=1)
-        lay.addWidget(spin)
+        h = QHBoxLayout(box)
+        h.setContentsMargins(0, 0, 0, 0)
+        name = QLabel(label)
+        name.setMinimumWidth(90)
+        widget.setMaximumWidth(240)
+        h.addWidget(name)
+        h.addWidget(widget)
+        h.addStretch(1)
         return box
 
-    def apply(self):
+    def _row2(self, checkbox, spin):
+        box = QWidget()
+        h = QHBoxLayout(box)
+        h.setContentsMargins(0, 0, 0, 0)
+        spin.setMaximumWidth(120)
+        h.addWidget(checkbox)
+        h.addWidget(spin)
+        h.addStretch(1)
+        return box
+
+    def _gb_spin(self):
+        spin = QDoubleSpinBox()
+        spin.setRange(0.1, 100_000.0)
+        spin.setDecimals(1)
+        spin.setSuffix(" GB")
+        spin.valueChanged.connect(self._on_cap)
+        return spin
+
+    # ---- load / handlers ----
+
+    def _load(self):
         s = self.settings
-        s.set("cap_enabled", self.enable.isChecked(), save=False)
-        s.set("cap_limit_gb", self.limit.value(), save=False)
-        s.set("cap_billing_day", self.day.value(), save=False)
+        idx = self.units.findData(s.get("rate_unit"))
+        self.units.setCurrentIndex(idx if idx >= 0 else 0)
+        self.track.setChecked(bool(s.get("track_apps")))
+        self.cap_enable.setChecked(bool(s.get("cap_enabled")))
+        self.cap_limit.setValue(float(s.get("cap_limit_gb")))
+        self.cap_day.setValue(int(s.get("cap_billing_day")))
+        self.daily_enable.setChecked(bool(s.get("daily_alert_enabled")))
+        self.daily_gb.setValue(float(s.get("daily_alert_gb")))
+        self.app_enable.setChecked(bool(s.get("app_alert_enabled")))
+        self.app_gb.setValue(float(s.get("app_alert_gb")))
+        self.autostart.setChecked(autostart.is_enabled())
+        self.start_min.setChecked(bool(s.get("start_minimized")))
+        self.close_tray.setChecked(bool(s.get("close_to_tray")))
+
+    def _on_units(self):
+        if self._loading:
+            return
+        self.rate_unit_changed.emit(self.units.currentData())
+
+    def _on_track(self, value):
+        if self._loading:
+            return
+        self.track_apps_changed.emit(bool(value))
+
+    def _on_autostart(self, value):
+        if self._loading:
+            return
+        self.autostart_changed.emit(bool(value))
+
+    def _on_cap(self, *_):
+        if self._loading:
+            return
+        s = self.settings
+        s.set("cap_enabled", self.cap_enable.isChecked(), save=False)
+        s.set("cap_limit_gb", self.cap_limit.value(), save=False)
+        s.set("cap_billing_day", self.cap_day.value(), save=False)
         s.set("daily_alert_enabled", self.daily_enable.isChecked(), save=False)
         s.set("daily_alert_gb", self.daily_gb.value(), save=False)
         s.set("app_alert_enabled", self.app_enable.isChecked(), save=False)
         s.set("app_alert_gb", self.app_gb.value(), save=False)
-        # changing thresholds resets which notifications have fired
-        s.set("cap_notified", {}, save=False)
-        s.set("daily_notified", {}, save=False)
-        s.set("app_notified", {}, save=False)
         s.save()
+        self.cap_settings_changed.emit()
+
+    def _save(self, key, value):
+        if self._loading:
+            return
+        self.settings.set(key, bool(value))
+
+    def reflect_tracking(self, active):
+        self.track.blockSignals(True)
+        self.track.setChecked(bool(active))
+        self.track.blockSignals(False)
 
 
 def _cell(text, color=None, align=Qt.AlignLeft | Qt.AlignVCenter):
@@ -793,10 +950,12 @@ class MainWindow(QMainWindow):
         self.history = HistoryTab(self.settings)
         self.apps = AppsTab(self.usage)
         self.process = ProcessTab()
+        self.settings_tab = SettingsTab(self.settings)
         self.tabs.addTab(self.live, "Live")
         self.tabs.addTab(self.history, "History")
         self.tabs.addTab(self.apps, "Apps")
         self.tabs.addTab(self.process, "Processes")
+        self.tabs.addTab(self.settings_tab, "Settings")
         self.setCentralWidget(self.tabs)
 
         self._build_menu()
@@ -808,6 +967,10 @@ class MainWindow(QMainWindow):
         self.live.combo.currentIndexChanged.connect(self._sync_iface)
         self.process.access_granted.connect(self._on_access_granted)
         self.process.tracking_toggled.connect(self._set_tracking)
+        self.settings_tab.rate_unit_changed.connect(self._set_units)
+        self.settings_tab.cap_settings_changed.connect(self._on_cap_settings)
+        self.settings_tab.track_apps_changed.connect(self._set_tracking)
+        self.settings_tab.autostart_changed.connect(self._set_autostart)
 
         # Persist an icon file and expose whether we should launch hidden.
         autostart.save_icon(self.icon)
@@ -849,43 +1012,16 @@ class MainWindow(QMainWindow):
         file_menu.addAction(act_quit)
 
         view_menu = bar.addMenu("View")
-        units_menu = view_menu.addMenu("Speed units")
-        self.unit_group = QActionGroup(self)
-        for label, mode in (
-            ("Bytes/s (KiB/s)", "bytes"),
-            ("Bits/s (Mbps)", "bits"),
-        ):
-            act = QAction(label, self, checkable=True)
-            act.setData(mode)
-            act.setChecked(self.settings.get("rate_unit") == mode)
-            act.triggered.connect(lambda _c, m=mode: self._set_units(m))
-            self.unit_group.addAction(act)
-            units_menu.addAction(act)
-        view_menu.addSeparator()
         act_refresh = QAction("Refresh history", self)
         act_refresh.setShortcut("F5")
         act_refresh.triggered.connect(self.history.reload)
         view_menu.addAction(act_refresh)
-
-        settings_menu = bar.addMenu("Settings")
-        act_cap = QAction("Data cap && alerts…", self)
-        act_cap.triggered.connect(self._open_cap_dialog)
-        settings_menu.addAction(act_cap)
-        self.act_track = QAction("Track per-app usage", self, checkable=True)
-        self.act_track.setChecked(bool(self.settings.get("track_apps")))
-        self.act_track.toggled.connect(self._set_tracking)
-        settings_menu.addAction(self.act_track)
-        settings_menu.addSeparator()
-        self.act_autostart = QAction("Launch on login", self, checkable=True)
-        self.act_autostart.setChecked(autostart.is_enabled())
-        self.act_autostart.toggled.connect(self._set_autostart)
-        settings_menu.addAction(self.act_autostart)
-        self.act_minimized = QAction("Start minimized to tray", self, checkable=True)
-        self.act_minimized.setChecked(bool(self.settings.get("start_minimized")))
-        self.act_minimized.toggled.connect(
-            lambda v: self.settings.set("start_minimized", bool(v))
+        view_menu.addSeparator()
+        act_settings = QAction("Settings", self)
+        act_settings.triggered.connect(
+            lambda: self.tabs.setCurrentWidget(self.settings_tab)
         )
-        settings_menu.addAction(self.act_minimized)
+        view_menu.addAction(act_settings)
 
     def _build_tray(self):
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -931,11 +1067,14 @@ class MainWindow(QMainWindow):
         else:
             autostart.disable()
 
-    def _open_cap_dialog(self):
-        dlg = CapDialog(self.settings, self)
-        if dlg.exec_() == QDialog.Accepted:
-            dlg.apply()
-            self.history.reload()
+    def _on_cap_settings(self):
+        # A cap/alert setting changed: reset which notifications have fired
+        # (so new thresholds can alert again) and refresh the History view.
+        self.settings.set("cap_notified", {}, save=False)
+        self.settings.set("daily_notified", {}, save=False)
+        self.settings.set("app_notified", {}, save=False)
+        self.settings.save()
+        self.history.reload()
 
     def _sync_iface(self, _index):
         iface = self.live.combo.currentData()
@@ -958,8 +1097,7 @@ class MainWindow(QMainWindow):
 
     def _set_tracking(self, enabled):
         self.settings.set("track_apps", bool(enabled))
-        if hasattr(self, "act_track"):
-            self.act_track.setChecked(bool(enabled))
+        self.settings_tab.reflect_tracking(enabled)
         if enabled:
             if has_capabilities():
                 self._start_tracking()
