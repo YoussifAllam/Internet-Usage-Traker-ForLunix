@@ -21,8 +21,14 @@ tray**, in a clean dark UI.
 | **Monthly data cap** | Set a GB limit + billing day; color-coded progress bar, **end-of-cycle forecast** (*"on pace to hit your cap on Jun 28"*), and notifications at 80% / 100%. |
 | **Usage alerts** | Get notified when today's **total**, or any single **app**, passes a GB threshold you set. |
 | **Export** | Save per-app usage (CSV/JSON) and daily history (CSV) for spreadsheets/reports. |
-| **Units toggle** | Switch rate display between bytes/s and bits/s (Mbps). |
+| **Settings page** | A dedicated **Settings** tab gathers every option (units, cap, alerts, tracking, startup) with a one-line hint under each. |
+| **One interface selector** | A single **Interface** dropdown in the tab-bar corner drives every tab, so it's always clear which interface you're viewing. |
 | **Persistent** | Remembers your interface, units, cap, alert, and tray settings between launches. |
+
+> **Per-interface, like vnstat.** Each interface is tracked separately. If the
+> numbers look low, check the **Interface** selector — e.g. `wlo1` (Wi-Fi) and
+> `eno1` (Ethernet) have independent totals, and a bare `vnstat` shows only your
+> *default* interface.
 
 ### Per-app usage (Apps tab)
 
@@ -39,10 +45,11 @@ database (`~/.local/share/nettracker/usage.db`). Toggle it under
 ![Usage by app](docs/screenshot-apps.png)
 
 <details>
-<summary>More screenshots — History &amp; Processes</summary>
+<summary>More screenshots — History, Processes &amp; Settings</summary>
 
 ![History](docs/screenshot-history.png)
 ![Processes](docs/screenshot-processes.png)
+![Settings](docs/screenshot-settings.png)
 
 </details>
 
@@ -95,11 +102,10 @@ Afterwards NetTracker runs nethogs as your normal user — no `sudo` per launch.
 
 | Action | Where |
 |--------|-------|
+| All settings (units, cap, alerts, tracking, startup) | The **Settings** tab — applied live, with a hint under each |
+| Pick the interface | **Interface** dropdown in the tab-bar corner (drives all tabs) |
 | Refresh history | `F5` or **View ▸ Refresh history** |
-| Speed units (bytes/s ↔ bits/s) | **View ▸ Speed units** |
-| Data cap & usage alerts | **Settings ▸ Data cap & alerts…** |
-| Track per-app usage on/off | **Settings ▸ Track per-app usage** |
-| Launch on login / start minimized | **Settings ▸ Launch on login / Start minimized** |
+| Jump to settings | **View ▸ Settings** |
 | Export usage | **Export** buttons on the History and Apps tabs |
 | Quit (not just hide) | `Ctrl+Q`, **File ▸ Quit**, or the tray menu |
 
