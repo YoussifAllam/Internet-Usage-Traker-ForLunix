@@ -22,6 +22,7 @@ DEFAULTS = {
     "app_alert_gb": 1.0,
     "daily_notified": {},  # {"<date>": true}
     "app_notified": {},  # {"<date>": ["app", ...]}
+    "metered_networks": [],  # SSIDs / networks the user flagged as metered
 }
 
 

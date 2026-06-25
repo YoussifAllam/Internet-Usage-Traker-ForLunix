@@ -1,0 +1,30 @@
+# Flatpak manifest (starter). Build with:
+#   flatpak-builder --user --install build io.github.youssifallam.NetTracker.yml
+# Note: nethogs runs on the host, not inside the sandbox; per-app/process
+# tracking needs host access or the binary's capabilities (see README).
+app-id: io.github.youssifallam.NetTracker
+runtime: org.kde.Platform
+runtime-version: '6.7'
+sdk: org.kde.Sdk
+command: nettracker
+finish-args:
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=host:ro          # read /sys counters, vnstat
+  - --talk-name=org.freedesktop.Notifications
+modules:
+  - name: python3-pyqt5
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app --no-build-isolation PyQt5
+  - name: nettracker
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 run.sh /app/bin/nettracker
+      - cp -r nettracker /app/lib/nettracker
+      - install -Dm644 main.py /app/lib/main.py
+    sources:
+      - type: dir
+        path: ..

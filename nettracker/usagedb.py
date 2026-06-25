@@ -26,6 +26,12 @@ class UsageDB:
             " rx REAL DEFAULT 0, tx REAL DEFAULT 0,"
             " PRIMARY KEY (day, iface, app))"
         )
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS net_usage ("
+            " day TEXT, network TEXT,"
+            " rx REAL DEFAULT 0, tx REAL DEFAULT 0,"
+            " PRIMARY KEY (day, network))"
+        )
         self.conn.commit()
 
     @staticmethod
@@ -47,6 +53,38 @@ class UsageDB:
             " rx = rx + excluded.rx, tx = tx + excluded.tx",
             (day, iface or "", app, float(rx_bytes), float(tx_bytes)),
         )
+
+    def add_net(self, network, rx_bytes, tx_bytes, day=None):
+        if not network or (rx_bytes <= 0 and tx_bytes <= 0):
+            return
+        day = day or self.today()
+        self.conn.execute(
+            "INSERT INTO net_usage (day, network, rx, tx)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(day, network) DO UPDATE SET"
+            " rx = rx + excluded.rx, tx = tx + excluded.tx",
+            (day, network, float(rx_bytes), float(tx_bytes)),
+        )
+
+    def net_totals(self, period="day", today=None):
+        """Per-network rx/tx for 'day' or 'month'. Sorted by total desc."""
+        today = today or datetime.date.today()
+        if period == "month":
+            where, param = "day LIKE ?", today.strftime("%Y-%m") + "%"
+        else:
+            where, param = "day = ?", today.isoformat()
+        cur = self.conn.execute(
+            "SELECT network, SUM(rx), SUM(tx) FROM net_usage"
+            f" WHERE {where} GROUP BY network"
+            " ORDER BY SUM(rx) + SUM(tx) DESC",
+            (param,),
+        )
+        out = []
+        for net, rx, tx in cur.fetchall():
+            rx = rx or 0
+            tx = tx or 0
+            out.append({"network": net, "rx": rx, "tx": tx, "total": rx + tx})
+        return out
 
     def commit(self):
         self.conn.commit()
