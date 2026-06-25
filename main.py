@@ -12,7 +12,8 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("NetTracker")
     window = MainWindow()
-    window.show()
+    if not getattr(window, "start_hidden", False):
+        window.show()
     sys.exit(app.exec_())
 
 

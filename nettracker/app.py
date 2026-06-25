@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -31,7 +32,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from . import sources
+from . import autostart, export, sources
 from .nethogs import (
     NethogsMonitor,
     grant_capabilities,
@@ -120,9 +121,7 @@ class StatCard(QFrame):
         head = QLabel(title)
         head.setObjectName("muted")
         if color:
-            head.setText(
-                f"<span style='color:{color.name()}'>●</span> {title}"
-            )
+            head.setText(f"<span style='color:{color.name()}'>●</span> {title}")
         self.value = QLabel("—")
         f = QFont()
         f.setPointSize(18)
@@ -141,7 +140,7 @@ class LiveTab(QWidget):
     def __init__(self):
         super().__init__()
         self.iface = None
-        self.prev = None           # (rx, tx, monotonic_time)
+        self.prev = None  # (rx, tx, monotonic_time)
         self.session_start = None  # (rx, tx)
         self.session_rx = 0
         self.session_tx = 0
@@ -204,9 +203,7 @@ class LiveTab(QWidget):
         self.prev = None
         self.session_rx = 0
         self.session_tx = 0
-        self.session_start = (
-            sources.read_counters(self.iface) if self.iface else None
-        )
+        self.session_start = sources.read_counters(self.iface) if self.iface else None
         self.graph.clear()
 
     def refresh_units(self):
@@ -240,19 +237,19 @@ class LiveTab(QWidget):
         if self.session_start is not None:
             self.session_rx = max(0, rx - self.session_start[0])
             self.session_tx = max(0, tx - self.session_start[1])
-            self.card_sess.set_value(
-                human_bytes(self.session_rx + self.session_tx)
-            )
+            self.card_sess.set_value(human_bytes(self.session_rx + self.session_tx))
         self.prev = (rx, tx, now)
 
 
 class HistoryTab(QWidget):
     cap_changed = pyqtSignal(object)  # dict or None
+    day_total_changed = pyqtSignal(float)  # today's total bytes
 
     def __init__(self, settings):
         super().__init__()
         self.iface = None
         self.settings = settings
+        self._days = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -263,6 +260,9 @@ class HistoryTab(QWidget):
         title.setObjectName("h1")
         top.addWidget(title)
         top.addStretch(1)
+        self.export_btn = QPushButton("Export CSV…")
+        self.export_btn.clicked.connect(self._export_csv)
+        top.addWidget(self.export_btn)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.reload)
         top.addWidget(self.refresh_btn)
@@ -285,8 +285,11 @@ class HistoryTab(QWidget):
         self.cap_title = QLabel("Monthly data cap")
         self.cap_title.setObjectName("muted")
         self.cap_bar = CapBar()
+        self.cap_forecast = QLabel("")
+        self.cap_forecast.setObjectName("muted")
         cap_lay.addWidget(self.cap_title)
         cap_lay.addWidget(self.cap_bar)
+        cap_lay.addWidget(self.cap_forecast)
         root.addWidget(self.cap_box)
 
         self.daily_label = QLabel("Last days")
@@ -336,9 +339,11 @@ class HistoryTab(QWidget):
         self.daily_chart.set_items(hist["days"][-14:])
         self.monthly_chart.set_items(hist["months"][-12:])
         self.daily_label.setText(f"Last days  ·  {hist['name']}")
-        self.status.setText(
-            "Stacked bars: download (blue) + upload (green)."
-        )
+        self.status.setText("Stacked bars: download (blue) + upload (green).")
+        self._days = hist["days"]
+        self._months = hist["months"]
+        today_total = hist["today"]["total"] if hist["today"] else 0
+        self.day_total_changed.emit(float(today_total))
         self._update_cap(hist["days"])
 
     def _update_cap(self, days):
@@ -351,13 +356,11 @@ class HistoryTab(QWidget):
         used, start = sources.cycle_usage(days, billing_day)
         limit_bytes = limit_gb * 1_000_000_000.0
         fraction = used / limit_bytes if limit_bytes > 0 else 0.0
-        caption = (
-            f"{human_gb(used)} of {limit_gb:g} GB"
-            f"  ·  {fraction * 100:.0f}%"
-        )
+        caption = f"{human_gb(used)} of {limit_gb:g} GB  ·  {fraction * 100:.0f}%"
         self.cap_bar.set_progress(fraction, caption)
-        self.cap_title.setText(
-            f"Monthly data cap  ·  cycle since {start.isoformat()}"
+        self.cap_title.setText(f"Monthly data cap  ·  cycle since {start.isoformat()}")
+        self.cap_forecast.setText(
+            self._forecast_text(used, limit_bytes, start, limit_gb)
         )
         self.cap_box.show()
         self.cap_changed.emit(
@@ -369,16 +372,59 @@ class HistoryTab(QWidget):
             }
         )
 
+    def _forecast_text(self, used, limit_bytes, start, limit_gb):
+        fc = sources.forecast(used, limit_bytes, start)
+        proj = fc["projected_total"]
+        end = fc["cycle_end"].strftime("%b %d")
+        if used >= limit_bytes:
+            return f"⚠ Cap exceeded — projected ~{human_gb(proj)} by {end}."
+        if fc["hit_date"] is not None:
+            hit = fc["hit_date"].strftime("%b %d")
+            return (
+                f"On pace to hit your {limit_gb:g} GB cap on {hit} "
+                f"(~{human_gb(proj)} projected by {end})."
+            )
+        return (
+            f"On track: ~{human_gb(proj)} projected by {end} "
+            f"(under your {limit_gb:g} GB cap)."
+        )
+
+    def _export_csv(self):
+        if not self._days:
+            self.status.setText("Nothing to export yet — refresh first.")
+            return
+        default = f"nettracker-history-{self.iface or 'iface'}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export daily history", default, "CSV files (*.csv)"
+        )
+        if not path:
+            return
+        rows = [
+            [d["label"], int(d["rx"]), int(d["tx"]), int(d["total"])]
+            for d in self._days
+        ]
+        try:
+            export.write_csv(
+                path, ["date", "rx_bytes", "tx_bytes", "total_bytes"], rows
+            )
+            self.status.setText(f"Exported {len(rows)} days to {path}")
+        except OSError as exc:
+            self.status.setText(f"Export failed: {exc}")
+
 
 class CapDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("Monthly data cap")
+        self.setWindowTitle("Data cap & alerts")
         self.setStyleSheet(STYLE)
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(430)
 
         form = QFormLayout(self)
+
+        cap_head = QLabel("Monthly cap")
+        cap_head.setObjectName("muted")
+        form.addRow(cap_head)
         self.enable = QCheckBox("Enable monthly cap")
         self.enable.setChecked(bool(settings.get("cap_enabled")))
         form.addRow(self.enable)
@@ -395,20 +441,58 @@ class CapDialog(QDialog):
         self.day.setValue(int(settings.get("cap_billing_day")))
         form.addRow("Billing day:", self.day)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
+        alert_head = QLabel("Usage alerts")
+        alert_head.setObjectName("muted")
+        form.addRow(QLabel(""))
+        form.addRow(alert_head)
+
+        self.daily_enable = QCheckBox("Alert when today's total exceeds")
+        self.daily_enable.setChecked(bool(settings.get("daily_alert_enabled")))
+        self.daily_gb = QDoubleSpinBox()
+        self.daily_gb.setRange(0.1, 100_000.0)
+        self.daily_gb.setDecimals(1)
+        self.daily_gb.setSuffix(" GB")
+        self.daily_gb.setValue(float(settings.get("daily_alert_gb")))
+        form.addRow(self._alert_row(self.daily_enable, self.daily_gb))
+
+        self.app_enable = QCheckBox("Alert when any app today exceeds")
+        self.app_enable.setChecked(bool(settings.get("app_alert_enabled")))
+        self.app_gb = QDoubleSpinBox()
+        self.app_gb.setRange(0.1, 100_000.0)
+        self.app_gb.setDecimals(1)
+        self.app_gb.setSuffix(" GB")
+        self.app_gb.setValue(float(settings.get("app_alert_gb")))
+        form.addRow(self._alert_row(self.app_enable, self.app_gb))
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
+    @staticmethod
+    def _alert_row(checkbox, spin):
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        spin.setMaximumWidth(120)
+        lay.addWidget(checkbox, stretch=1)
+        lay.addWidget(spin)
+        return box
+
     def apply(self):
-        self.settings.set("cap_enabled", self.enable.isChecked(), save=False)
-        self.settings.set("cap_limit_gb", self.limit.value(), save=False)
-        self.settings.set("cap_billing_day", self.day.value(), save=False)
-        # changing the cap resets which thresholds have been notified
-        self.settings.set("cap_notified", {}, save=False)
-        self.settings.save()
+        s = self.settings
+        s.set("cap_enabled", self.enable.isChecked(), save=False)
+        s.set("cap_limit_gb", self.limit.value(), save=False)
+        s.set("cap_billing_day", self.day.value(), save=False)
+        s.set("daily_alert_enabled", self.daily_enable.isChecked(), save=False)
+        s.set("daily_alert_gb", self.daily_gb.value(), save=False)
+        s.set("app_alert_enabled", self.app_enable.isChecked(), save=False)
+        s.set("app_alert_gb", self.app_gb.value(), save=False)
+        # changing thresholds resets which notifications have fired
+        s.set("cap_notified", {}, save=False)
+        s.set("daily_notified", {}, save=False)
+        s.set("app_notified", {}, save=False)
+        s.save()
 
 
 def _cell(text, color=None, align=Qt.AlignLeft | Qt.AlignVCenter):
@@ -457,9 +541,7 @@ class ProcessTab(QWidget):
         root.addWidget(self.banner)
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(
-            ["Process", "PID", "Download", "Upload"]
-        )
+        self.table.setHorizontalHeaderLabels(["Process", "PID", "Download", "Upload"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -503,8 +585,7 @@ class ProcessTab(QWidget):
         if not has_capabilities():
             return
         self.status.setText(
-            "Tracking in background — rates refresh every "
-            f"{TRACK_INTERVAL}s."
+            "Tracking in background — rates refresh every " f"{TRACK_INTERVAL}s."
             if active
             else "Tracking paused."
         )
@@ -538,12 +619,14 @@ class ProcessTab(QWidget):
             self.table.setItem(i, 0, _cell(r["program"]))
             self.table.setItem(i, 1, _cell(r["pid"], align=Qt.AlignCenter))
             self.table.setItem(
-                i, 2, _cell(human_rate(r["recv"]), RX_COLOR,
-                            Qt.AlignRight | Qt.AlignVCenter)
+                i,
+                2,
+                _cell(human_rate(r["recv"]), RX_COLOR, Qt.AlignRight | Qt.AlignVCenter),
             )
             self.table.setItem(
-                i, 3, _cell(human_rate(r["sent"]), TX_COLOR,
-                            Qt.AlignRight | Qt.AlignVCenter)
+                i,
+                3,
+                _cell(human_rate(r["sent"]), TX_COLOR, Qt.AlignRight | Qt.AlignVCenter),
             )
         if not rows and self._tracking:
             self.status.setText("Tracking… no active traffic right now.")
@@ -572,6 +655,12 @@ class AppsTab(QWidget):
         self.period.addItem("This month", "month")
         self.period.currentIndexChanged.connect(self.reload)
         top.addWidget(self.period)
+        self.export_btn = QPushButton("Export ▾")
+        export_menu = QMenu(self.export_btn)
+        export_menu.addAction("CSV…", lambda: self._export("csv"))
+        export_menu.addAction("JSON…", lambda: self._export("json"))
+        self.export_btn.setMenu(export_menu)
+        top.addWidget(self.export_btn)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.reload)
         top.addWidget(self.refresh_btn)
@@ -579,6 +668,7 @@ class AppsTab(QWidget):
 
         self.summary = StatCard("Tracked total")
         root.addWidget(self.summary)
+        self._rows = []
 
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(
@@ -611,6 +701,7 @@ class AppsTab(QWidget):
             rows = self.usage.month_totals(self.iface)
         else:
             rows = self.usage.day_totals(self.iface)
+        self._rows = rows
         grand = sum(r["total"] for r in rows) or 1
         self.summary.set_value(f"{human_bytes(grand if rows else 0)}")
         self.table.setRowCount(len(rows))
@@ -618,19 +709,63 @@ class AppsTab(QWidget):
             share = r["total"] / grand * 100
             self.table.setItem(i, 0, _cell(r["app"]))
             self.table.setItem(
-                i, 1, _cell(human_bytes(r["rx"]), RX_COLOR,
-                            Qt.AlignRight | Qt.AlignVCenter)
+                i,
+                1,
+                _cell(human_bytes(r["rx"]), RX_COLOR, Qt.AlignRight | Qt.AlignVCenter),
             )
             self.table.setItem(
-                i, 2, _cell(human_bytes(r["tx"]), TX_COLOR,
-                            Qt.AlignRight | Qt.AlignVCenter)
+                i,
+                2,
+                _cell(human_bytes(r["tx"]), TX_COLOR, Qt.AlignRight | Qt.AlignVCenter),
             )
             self.table.setItem(
-                i, 3, _cell(f"{human_bytes(r['total'])}  ({share:.0f}%)",
-                            align=Qt.AlignRight | Qt.AlignVCenter)
+                i,
+                3,
+                _cell(
+                    f"{human_bytes(r['total'])}  ({share:.0f}%)",
+                    align=Qt.AlignRight | Qt.AlignVCenter,
+                ),
             )
         if not rows:
             self.summary.set_value("—")
+
+    def _export(self, fmt):
+        if not self._rows:
+            self.note.setText("Nothing to export yet for this period.")
+            return
+        period = self.period.currentData()
+        default = f"nettracker-apps-{period}-{self.iface or 'iface'}.{fmt}"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export per-app usage", default, f"{fmt.upper()} (*.{fmt})"
+        )
+        if not path:
+            return
+        try:
+            if fmt == "csv":
+                export.write_csv(
+                    path,
+                    ["app", "rx_bytes", "tx_bytes", "total_bytes"],
+                    [
+                        [r["app"], int(r["rx"]), int(r["tx"]), int(r["total"])]
+                        for r in self._rows
+                    ],
+                )
+            else:
+                export.write_json(
+                    path,
+                    [
+                        {
+                            "app": r["app"],
+                            "rx_bytes": int(r["rx"]),
+                            "tx_bytes": int(r["tx"]),
+                            "total_bytes": int(r["total"]),
+                        }
+                        for r in self._rows
+                    ],
+                )
+            self.note.setText(f"Exported {len(self._rows)} apps to {path}")
+        except OSError as exc:
+            self.note.setText(f"Export failed: {exc}")
 
     def showEvent(self, event):
         self.reload()
@@ -669,9 +804,15 @@ class MainWindow(QMainWindow):
 
         self.live.speed_updated.connect(self._on_speed)
         self.history.cap_changed.connect(self._on_cap)
+        self.history.day_total_changed.connect(self._check_daily_alert)
         self.live.combo.currentIndexChanged.connect(self._sync_iface)
         self.process.access_granted.connect(self._on_access_granted)
         self.process.tracking_toggled.connect(self._set_tracking)
+
+        # Persist an icon file and expose whether we should launch hidden.
+        autostart.save_icon(self.icon)
+        want_hidden = bool(self.settings.get("start_minimized"))
+        self.start_hidden = want_hidden and self.tray is not None
 
         interfaces = sources.list_interfaces()
         self.live.populate(interfaces)
@@ -727,13 +868,24 @@ class MainWindow(QMainWindow):
         view_menu.addAction(act_refresh)
 
         settings_menu = bar.addMenu("Settings")
-        act_cap = QAction("Data cap…", self)
+        act_cap = QAction("Data cap && alerts…", self)
         act_cap.triggered.connect(self._open_cap_dialog)
         settings_menu.addAction(act_cap)
         self.act_track = QAction("Track per-app usage", self, checkable=True)
         self.act_track.setChecked(bool(self.settings.get("track_apps")))
         self.act_track.toggled.connect(self._set_tracking)
         settings_menu.addAction(self.act_track)
+        settings_menu.addSeparator()
+        self.act_autostart = QAction("Launch on login", self, checkable=True)
+        self.act_autostart.setChecked(autostart.is_enabled())
+        self.act_autostart.toggled.connect(self._set_autostart)
+        settings_menu.addAction(self.act_autostart)
+        self.act_minimized = QAction("Start minimized to tray", self, checkable=True)
+        self.act_minimized.setChecked(bool(self.settings.get("start_minimized")))
+        self.act_minimized.toggled.connect(
+            lambda v: self.settings.set("start_minimized", bool(v))
+        )
+        settings_menu.addAction(self.act_minimized)
 
     def _build_tray(self):
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -771,6 +923,13 @@ class MainWindow(QMainWindow):
         set_rate_unit(mode)
         self.settings.set("rate_unit", mode)
         self.live.refresh_units()
+
+    def _set_autostart(self, enabled):
+        if enabled:
+            icon_path = autostart.save_icon(self.icon)
+            autostart.enable(icon_path)
+        else:
+            autostart.disable()
 
     def _open_cap_dialog(self):
         dlg = CapDialog(self.settings, self)
@@ -815,9 +974,7 @@ class MainWindow(QMainWindow):
         iface = self.live.iface
         if not iface or not has_capabilities():
             return
-        self.monitor = NethogsMonitor(
-            iface=iface, delay=TRACK_INTERVAL, parent=self
-        )
+        self.monitor = NethogsMonitor(iface=iface, delay=TRACK_INTERVAL, parent=self)
         self.monitor.updated.connect(self._on_samples)
         self.monitor.error.connect(self._on_track_error)
         self.monitor.start()
@@ -839,8 +996,52 @@ class MainWindow(QMainWindow):
             )
         self.usage.commit()
         self.process.update_live(rows)
+        self._check_app_alerts()
         if self.apps.isVisible():
             self.apps.reload()
+
+    # ---- alerts ------------------------------------------------------
+
+    def _notify(self, msg, title="NetTracker"):
+        if self.tray:
+            self.tray.showMessage(title, msg, self.icon, 8000)
+
+    def _check_daily_alert(self, today_total):
+        if not self.settings.get("daily_alert_enabled"):
+            return
+        threshold = float(self.settings.get("daily_alert_gb")) * 1e9
+        if today_total < threshold:
+            return
+        day = self.usage.today()
+        notified = dict(self.settings.get("daily_notified") or {})
+        if notified.get(day):
+            return
+        notified = {day: True}  # keep only the current day
+        self.settings.set("daily_notified", notified)
+        self._notify(
+            f"Daily usage passed {self.settings.get('daily_alert_gb'):g} GB "
+            f"({human_gb(today_total)} today)."
+        )
+
+    def _check_app_alerts(self):
+        if not self.settings.get("app_alert_enabled"):
+            return
+        threshold = float(self.settings.get("app_alert_gb")) * 1e9
+        day = self.usage.today()
+        store = dict(self.settings.get("app_notified") or {})
+        done = list(store.get(day, []))
+        changed = False
+        for row in self.usage.day_totals(self.live.iface):
+            if row["total"] >= threshold and row["app"] not in done:
+                done.append(row["app"])
+                changed = True
+                self._notify(
+                    f"{row['app']} passed "
+                    f"{self.settings.get('app_alert_gb'):g} GB today "
+                    f"({human_gb(row['total'])})."
+                )
+        if changed:
+            self.settings.set("app_notified", {day: done})
 
     def _on_track_error(self, msg):
         self._stop_tracking()
@@ -899,8 +1100,7 @@ class MainWindow(QMainWindow):
             if not self.settings.get("tray_hint_shown"):
                 self.tray.showMessage(
                     "NetTracker",
-                    "Still running in the tray. "
-                    "Right-click the icon to quit.",
+                    "Still running in the tray. " "Right-click the icon to quit.",
                     self.icon,
                     5000,
                 )

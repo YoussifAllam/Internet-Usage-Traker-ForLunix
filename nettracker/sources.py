@@ -162,6 +162,52 @@ def cycle_start(billing_day, today):
     return datetime.date(year, month, day)
 
 
+def _add_month(d):
+    import datetime
+
+    month = d.month + 1
+    year = d.year
+    if month > 12:
+        month = 1
+        year += 1
+    return datetime.date(year, month, min(d.day, 28))
+
+
+def forecast(used_bytes, limit_bytes, start, today=None):
+    """Project end-of-cycle usage and the date the cap would be hit.
+
+    Returns a dict: avg_per_day, projected_total, cycle_end (inclusive),
+    hit_date (or None), and over_by (projected - limit, can be negative).
+    """
+    import datetime
+    import math
+
+    if today is None:
+        today = datetime.date.today()
+    next_start = _add_month(start)
+    cycle_len = max(1, (next_start - start).days)
+    days_elapsed = max(1, (today - start).days + 1)
+    avg = used_bytes / days_elapsed
+    projected = avg * cycle_len
+
+    hit_date = None
+    if used_bytes >= limit_bytes > 0:
+        hit_date = today
+    elif avg > 0 and limit_bytes > 0:
+        days_to = math.ceil((limit_bytes - used_bytes) / avg)
+        candidate = today + datetime.timedelta(days=days_to)
+        if candidate < next_start:
+            hit_date = candidate
+
+    return {
+        "avg_per_day": avg,
+        "projected_total": projected,
+        "cycle_end": next_start - datetime.timedelta(days=1),
+        "hit_date": hit_date,
+        "over_by": projected - limit_bytes,
+    }
+
+
 def cycle_usage(days, billing_day, today=None):
     """Sum rx+tx (bytes) of daily rows on/after the cycle start.
 

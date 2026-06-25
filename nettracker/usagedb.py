@@ -11,9 +11,7 @@ import sqlite3
 
 
 def _db_path():
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser(
-        "~/.local/share"
-    )
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     return os.path.join(base, "nettracker", "usage.db")
 
 
@@ -64,9 +62,7 @@ class UsageDB:
         for app, rx, tx in cur.fetchall():
             rx = rx or 0
             tx = tx or 0
-            out.append(
-                {"app": app, "rx": rx, "tx": tx, "total": rx + tx}
-            )
+            out.append({"app": app, "rx": rx, "tx": tx, "total": rx + tx})
         return out
 
     def day_totals(self, iface, day=None):
@@ -75,9 +71,7 @@ class UsageDB:
 
     def month_totals(self, iface, ym=None):
         ym = ym or self.this_month()
-        return self._rows(
-            "day LIKE ? AND iface = ?", (ym + "%", iface or "")
-        )
+        return self._rows("day LIKE ? AND iface = ?", (ym + "%", iface or ""))
 
     def close(self):
         try:

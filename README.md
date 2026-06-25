@@ -17,10 +17,12 @@ tray**, in a clean dark UI.
 | **History** | Today / this-month / all-time totals plus stacked bar charts for the last 14 days and 12 months, from the `vnstat` database. |
 | **Apps** | Per-app usage **totals** for today / this month (see below). |
 | **Processes** | Live per-process download/upload **rates** via `nethogs`. |
-| **System tray** | Live ↓/↑ in the tooltip; close-to-tray; left-click to show/hide. |
-| **Monthly data cap** | Set a GB limit + billing day; color-coded progress bar and desktop notifications at 80% and 100% of the cycle. |
+| **System tray** | Live ↓/↑ in the tooltip; close-to-tray; left-click to show/hide. Optional **launch on login** + **start minimized**. |
+| **Monthly data cap** | Set a GB limit + billing day; color-coded progress bar, **end-of-cycle forecast** (*"on pace to hit your cap on Jun 28"*), and notifications at 80% / 100%. |
+| **Usage alerts** | Get notified when today's **total**, or any single **app**, passes a GB threshold you set. |
+| **Export** | Save per-app usage (CSV/JSON) and daily history (CSV) for spreadsheets/reports. |
 | **Units toggle** | Switch rate display between bytes/s and bits/s (Mbps). |
-| **Persistent** | Remembers your interface, units, and cap settings between launches. |
+| **Persistent** | Remembers your interface, units, cap, alert, and tray settings between launches. |
 
 ### Per-app usage (Apps tab)
 
@@ -95,8 +97,10 @@ Afterwards NetTracker runs nethogs as your normal user — no `sudo` per launch.
 |--------|-------|
 | Refresh history | `F5` or **View ▸ Refresh history** |
 | Speed units (bytes/s ↔ bits/s) | **View ▸ Speed units** |
-| Monthly data cap | **Settings ▸ Data cap…** |
+| Data cap & usage alerts | **Settings ▸ Data cap & alerts…** |
 | Track per-app usage on/off | **Settings ▸ Track per-app usage** |
+| Launch on login / start minimized | **Settings ▸ Launch on login / Start minimized** |
+| Export usage | **Export** buttons on the History and Apps tabs |
 | Quit (not just hide) | `Ctrl+Q`, **File ▸ Quit**, or the tray menu |
 
 ## Where data lives
@@ -120,6 +124,8 @@ NetTracker.
 | `nettracker/usagedb.py` | SQLite per-app usage accumulator |
 | `nettracker/widgets.py` | `LiveGraph`, `BarChart`, `CapBar`, icon (QPainter) |
 | `nettracker/settings.py` | Persistent JSON settings |
+| `nettracker/autostart.py` | freedesktop autostart entry (launch on login) |
+| `nettracker/export.py` | CSV / JSON writers |
 | `nettracker/utils.py` | Byte/rate/GB formatting + unit toggle |
 
 ## License

@@ -12,7 +12,15 @@ DEFAULTS = {
     "cap_notified": {},  # {"<cycle-key>": [80, 100]}
     "close_to_tray": True,
     "tray_hint_shown": False,
-    "track_apps": True,       # accumulate per-app usage in the background
+    "track_apps": True,  # accumulate per-app usage in the background
+    "start_minimized": False,  # start hidden in the tray
+    # usage alerts
+    "daily_alert_enabled": False,
+    "daily_alert_gb": 2.0,
+    "app_alert_enabled": False,
+    "app_alert_gb": 1.0,
+    "daily_notified": {},  # {"<date>": true}
+    "app_notified": {},  # {"<date>": ["app", ...]}
 }
 
 
