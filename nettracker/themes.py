@@ -18,7 +18,7 @@ def _clamp(v):
 
 def _hex_to_rgb(h):
     h = h.lstrip("#")
-    return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+    return tuple(int(h[i: i + 2], 16) for i in (0, 2, 4))
 
 
 def _rgb_to_hex(rgb):

@@ -49,12 +49,8 @@ def read_total_counters():
     total_rx = total_tx = 0
     any_ok = False
     for info in list_interfaces():
-        rx = _read_text(
-            os.path.join(SYS_NET, info["name"], "statistics", "rx_bytes")
-        )
-        tx = _read_text(
-            os.path.join(SYS_NET, info["name"], "statistics", "tx_bytes")
-        )
+        rx = _read_text(os.path.join(SYS_NET, info["name"], "statistics", "rx_bytes"))
+        tx = _read_text(os.path.join(SYS_NET, info["name"], "statistics", "tx_bytes"))
         try:
             total_rx += int(rx)
             total_tx += int(tx)

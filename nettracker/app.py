@@ -963,9 +963,7 @@ class AppsTab(QWidget):
         month = self.period.currentData() == "month"
         if self.iface == sources.ALL_IFACES:
             rows = (
-                self.usage.month_totals_all()
-                if month
-                else self.usage.day_totals_all()
+                self.usage.month_totals_all() if month else self.usage.day_totals_all()
             )
         elif month:
             rows = self.usage.month_totals(self.iface)
@@ -1037,7 +1035,7 @@ class AppsTab(QWidget):
         except OSError as exc:
             self.note.setText(f"Export failed: {exc}")
 
-    def _open_detail(self, row, _col):
+    def _open_detail(self, row, _col):  # noqa
         item = self.table.item(row, 0)
         if item is None:
             return
