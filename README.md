@@ -14,8 +14,8 @@ tray**, in a clean dark UI.
 | | |
 |---|---|
 | **Live** | Real-time download/upload speed, a scrolling 60-second graph, and session totals. Reads kernel counters from `/sys/class/net`, so **no root needed**. |
-| **History** | Today / this-month / all-time totals plus stacked bar charts for the last 14 days and 12 months, from the `vnstat` database. |
-| **Apps** | Per-app usage **totals** for today / this month (see below). |
+| **History** | Today / this-month / all-time totals plus stacked bar charts — **today by hour**, the last 14 days, and 12 months — from the `vnstat` database. |
+| **Apps** | Per-app usage **totals** for today / this month, and **double-click any app for its 14-day trend** (see below). |
 | **Processes** | Live per-process download/upload **rates** via `nethogs`. |
 | **System tray** | Live ↓/↑ in the tooltip; close-to-tray; left-click to show/hide. Optional **launch on login** + **start minimized**. |
 | **Monthly data cap** | Set a GB limit + billing day; color-coded progress bar, **end-of-cycle forecast** (*"on pace to hit your cap on Jun 28"*), and notifications at 80% / 100%. |

@@ -73,6 +73,42 @@ class UsageDB:
         ym = ym or self.this_month()
         return self._rows("day LIKE ? AND iface = ?", (ym + "%", iface or ""))
 
+    def app_daily(self, app, iface=None, days=14, today=None):
+        """Daily rx/tx for one app over the last `days` (zero-filled).
+
+        iface=None aggregates across all interfaces. Returns rows shaped for
+        the bar chart: {label "MM/DD", date, rx, tx, total}.
+        """
+        today = today or datetime.date.today()
+        start = today - datetime.timedelta(days=days - 1)
+        if iface is None:
+            cur = self.conn.execute(
+                "SELECT day, SUM(rx), SUM(tx) FROM app_usage"
+                " WHERE app = ? AND day >= ? GROUP BY day",
+                (app, start.isoformat()),
+            )
+        else:
+            cur = self.conn.execute(
+                "SELECT day, SUM(rx), SUM(tx) FROM app_usage"
+                " WHERE app = ? AND iface = ? AND day >= ? GROUP BY day",
+                (app, iface, start.isoformat()),
+            )
+        found = {day: (rx or 0, tx or 0) for day, rx, tx in cur.fetchall()}
+        out = []
+        for i in range(days):
+            d = start + datetime.timedelta(days=i)
+            rx, tx = found.get(d.isoformat(), (0, 0))
+            out.append(
+                {
+                    "label": d.strftime("%m/%d"),
+                    "date": (d.year, d.month, d.day),
+                    "rx": rx,
+                    "tx": tx,
+                    "total": rx + tx,
+                }
+            )
+        return out
+
     def day_totals_all(self, day=None):
         """Per-app totals for one day across every interface."""
         day = day or self.today()

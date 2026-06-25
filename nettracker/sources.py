@@ -119,15 +119,18 @@ def parse_history(entry):
         out = []
         for item in traffic.get(key, []):
             date = item.get("date", {})
-            label = _date_label(date, item.get("time"))
+            time = item.get("time")
+            y = date.get("year")
+            m = date.get("month")
+            d = date.get("day")
+            hh = time.get("hour") if time else None
             out.append(
                 {
-                    "label": label,
-                    "date": (
-                        date.get("year"),
-                        date.get("month"),
-                        date.get("day"),
-                    ),
+                    "label": _date_label(date, time),
+                    "date": (y, m, d),
+                    # unique, sortable key (per-hour when time is present)
+                    "key": (y or 0, m or 0, d or 0, hh if hh is not None else -1),
+                    "hour": hh,
                     "rx": item.get("rx", 0),
                     "tx": item.get("tx", 0),
                     "total": item.get("rx", 0) + item.get("tx", 0),
@@ -139,6 +142,10 @@ def parse_history(entry):
     days = rows("day")
     months = rows("month")
     top = rows("top")
+    hours = rows("hour")
+    for r in hours:
+        if r["hour"] is not None:
+            r["label"] = f"{r['hour']:02d}:00"
 
     today = days[-1] if days else None
     this_month = months[-1] if months else None
@@ -154,6 +161,7 @@ def parse_history(entry):
         "this_month": this_month,
         "days": days,
         "months": months,
+        "hours": hours,
         "top": top,
     }
 
@@ -178,30 +186,34 @@ def fetch_all_history():
 
 
 def _merge_rows(rowlists):
-    """Sum rows from several interfaces, keyed by date, sorted ascending."""
+    """Sum rows from several interfaces, keyed per row, sorted ascending."""
     acc = {}
     for rows in rowlists:
         for r in rows:
-            key = r["date"]
+            key = r["key"]
             slot = acc.setdefault(
                 key,
-                {"label": r["label"], "date": key, "rx": 0, "tx": 0, "total": 0},
+                {
+                    "label": r["label"],
+                    "date": r["date"],
+                    "key": key,
+                    "hour": r.get("hour"),
+                    "rx": 0,
+                    "tx": 0,
+                    "total": 0,
+                },
             )
             slot["rx"] += r["rx"]
             slot["tx"] += r["tx"]
             slot["total"] += r["total"]
-    return [
-        acc[k]
-        for k in sorted(
-            acc, key=lambda t: tuple(x if x is not None else 0 for x in t)
-        )
-    ]
+    return [acc[k] for k in sorted(acc)]
 
 
 def merge_histories(hists):
     """Combine several parse_history() dicts into one aggregate dict."""
     days = _merge_rows([h["days"] for h in hists])
     months = _merge_rows([h["months"] for h in hists])
+    hours = _merge_rows([h.get("hours", []) for h in hists])
     top = sorted(
         _merge_rows([h["top"] for h in hists]),
         key=lambda r: r["total"],
@@ -220,6 +232,7 @@ def merge_histories(hists):
         "this_month": months[-1] if months else None,
         "days": days,
         "months": months,
+        "hours": hours,
         "top": top,
     }
 

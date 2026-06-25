@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -308,6 +309,12 @@ class HistoryTab(QWidget):
         cap_lay.addWidget(self.cap_forecast)
         root.addWidget(self.cap_box)
 
+        self.hourly_label = QLabel("Today by hour")
+        self.hourly_label.setObjectName("muted")
+        root.addWidget(self.hourly_label)
+        self.hourly_chart = BarChart()
+        root.addWidget(self.hourly_chart, stretch=1)
+
         self.daily_label = QLabel("Last days")
         self.daily_label.setObjectName("muted")
         root.addWidget(self.daily_label)
@@ -355,6 +362,7 @@ class HistoryTab(QWidget):
         self.card_today.set_value(fmt(hist["today"]))
         self.card_month.set_value(fmt(hist["this_month"]))
         self.card_total.set_value(fmt(hist["total"]))
+        self.hourly_chart.set_items(hist.get("hours", [])[-24:])
         self.daily_chart.set_items(hist["days"][-14:])
         self.monthly_chart.set_items(hist["months"][-12:])
         self.daily_label.setText(f"Last days  ·  {hist['name']}")
@@ -902,6 +910,7 @@ class AppsTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.cellDoubleClicked.connect(self._open_detail)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -910,8 +919,9 @@ class AppsTab(QWidget):
         root.addWidget(self.table, stretch=1)
 
         self.note = QLabel(
-            "Counts only since tracking started — it cannot split usage that "
-            "happened before. Some traffic stays unattributed by nethogs."
+            "Double-click an app to see its daily trend. Counts only since "
+            "tracking started — it cannot split usage that happened before. "
+            "Some traffic stays unattributed by nethogs."
         )
         self.note.setObjectName("muted")
         self.note.setWordWrap(True)
@@ -920,6 +930,34 @@ class AppsTab(QWidget):
     def set_iface(self, iface):
         self.iface = iface
         self.reload()
+
+    def _open_detail(self, row, _col=0):
+        if row < 0 or row >= len(self._rows):
+            return
+        app_name = self._rows[row]["app"]
+        iface = None if self.iface == sources.ALL_IFACES else self.iface
+        series = self.usage.app_daily(app_name, iface, days=14)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{app_name} — last 14 days")
+        dlg.resize(560, 380)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+        title = QLabel(f"Daily usage · {app_name}")
+        title.setObjectName("h1")
+        lay.addWidget(title)
+        chart = BarChart()
+        chart.set_items(series)
+        lay.addWidget(chart, stretch=1)
+        total = sum(d["total"] for d in series)
+        note = QLabel(
+            f"{human_bytes(total)} over the last 14 days  ·  "
+            "download (blue) + upload (green)"
+        )
+        note.setObjectName("muted")
+        lay.addWidget(note)
+        dlg.exec_()
 
     def reload(self):
         month = self.period.currentData() == "month"
@@ -999,9 +1037,55 @@ class AppsTab(QWidget):
         except OSError as exc:
             self.note.setText(f"Export failed: {exc}")
 
+    def _open_detail(self, row, _col):
+        item = self.table.item(row, 0)
+        if item is None:
+            return
+        app = item.text()
+        iface = None if self.iface == sources.ALL_IFACES else self.iface
+        rows = self.usage.app_daily(app, iface=iface, days=14)
+        AppDetailDialog(app, rows, self).exec_()
+
     def showEvent(self, event):
         self.reload()
         super().showEvent(event)
+
+
+class AppDetailDialog(QDialog):
+    """Daily usage trend for a single app over the last two weeks."""
+
+    def __init__(self, app, rows, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{app} — daily usage")
+        self.resize(620, 380)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+
+        title = QLabel(app)
+        title.setObjectName("h1")
+        lay.addWidget(title)
+
+        total = sum(r["total"] for r in rows)
+        active = sum(1 for r in rows if r["total"] > 0)
+        summary = QLabel(
+            f"{human_bytes(total)} over {len(rows)} days "
+            f"·  active on {active} day(s)"
+        )
+        summary.setObjectName("muted")
+        lay.addWidget(summary)
+
+        chart = BarChart()
+        chart.set_items(rows)
+        lay.addWidget(chart, stretch=1)
+
+        legend = QLabel(
+            f"<span style='color:{RX_COLOR.name()}'>■</span> Download&nbsp;&nbsp;"
+            f"<span style='color:{TX_COLOR.name()}'>■</span> Upload"
+        )
+        legend.setObjectName("muted")
+        lay.addWidget(legend, alignment=Qt.AlignRight)
 
 
 class MainWindow(QMainWindow):
@@ -1156,6 +1240,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "live"):
             for w in (
                 self.live.graph,
+                self.history.hourly_chart,
                 self.history.daily_chart,
                 self.history.monthly_chart,
                 self.history.cap_bar,
