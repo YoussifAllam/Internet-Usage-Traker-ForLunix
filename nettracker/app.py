@@ -92,46 +92,69 @@ class StatCard(QFrame):
 
 
 class ThemeCard(QFrame):
-    """A clickable palette card: theme name plus a row of color swatches."""
+    """A clickable palette card rendered in its *own* colors — a live preview
+    of what the app will look like, with the active theme clearly marked."""
 
     clicked = pyqtSignal(str)
 
     def __init__(self, theme):
         super().__init__()
         self.theme_id = theme["id"]
-        self.setObjectName("themecard")
-        self.setProperty("selected", False)
+        self._pv = themes.preview(theme["id"])
+        self._selected = False
         self.setCursor(Qt.PointingHandCursor)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 10, 12, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(14, 12, 14, 14)
+        lay.setSpacing(11)
 
-        name = QLabel(theme["name"])
-        f = QFont()
-        f.setBold(True)
-        name.setFont(f)
-        lay.addWidget(name)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        self.name = QLabel(theme["name"])
+        nf = QFont()
+        nf.setBold(True)
+        nf.setPointSize(11)
+        self.name.setFont(nf)
+        top.addWidget(self.name)
+        top.addStretch(1)
+        self.badge = QLabel("● Active")
+        bf = QFont()
+        bf.setBold(True)
+        bf.setPointSize(8)
+        self.badge.setFont(bf)
+        top.addWidget(self.badge)
+        lay.addLayout(top)
 
-        swatches = QHBoxLayout()
-        swatches.setSpacing(6)
-        swatches.setContentsMargins(0, 0, 0, 0)
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        chips.setContentsMargins(0, 0, 0, 0)
         for color in theme["swatches"]:
-            chip = QFrame()
-            chip.setFixedSize(28, 28)
+            chip = QLabel()
+            chip.setFixedHeight(22)
             chip.setStyleSheet(
                 f"background: {color}; border-radius: 5px;"
-                "border: 1px solid rgba(255,255,255,0.18);"
+                "border: 1px solid rgba(127,127,127,0.45);"
             )
-            swatches.addWidget(chip)
-        swatches.addStretch(1)
-        lay.addLayout(swatches)
+            chips.addWidget(chip, 1)
+        lay.addLayout(chips)
+
+        self._restyle()
 
     def set_selected(self, selected):
-        self.setProperty("selected", bool(selected))
-        # Re-evaluate the [selected="true"] stylesheet rule.
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self._selected = bool(selected)
+        self._restyle()
+
+    def _restyle(self):
+        pv = self._pv
+        edge = pv["accent"] if self._selected else pv["border"]
+        width = 2 if self._selected else 1
+        self.setStyleSheet(
+            f"ThemeCard {{ background: {pv['bg']}; border: {width}px solid {edge};"
+            f" border-radius: 12px; }}"
+        )
+        self.name.setStyleSheet(f"color: {pv['text']}; background: transparent;")
+        self.badge.setStyleSheet(f"color: {pv['accent']}; background: transparent;")
+        self.badge.setVisible(self._selected)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1052,6 +1075,18 @@ class MainWindow(QMainWindow):
         self.cap_timer.setInterval(120_000)
         self.cap_timer.timeout.connect(self.history.reload)
         self.cap_timer.start()
+
+        self._center_on_screen()
+
+    def _center_on_screen(self):
+        """Open centered on the active screen so the window can't land partly
+        off the edge (which would clip the menu bar / left-aligned content)."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = self.frameGeometry()
+        geo.moveCenter(screen.availableGeometry().center())
+        self.move(geo.topLeft())
 
     # ---- menu & tray -------------------------------------------------
 

@@ -123,6 +123,19 @@ def chart_colors(theme_id):
     return _darken(t["surface"], 0.18), t["muted"], bg
 
 
+def preview(theme_id):
+    """Resolved colors for rendering a theme's own preview card."""
+    t = get_theme(theme_id)
+    return {
+        "bg": t["bg"],
+        "surface": t["surface"],
+        "text": t["text"],
+        "muted": t["muted"],
+        "accent": t["accent"],
+        "border": t.get("border", _lighten(t["surface"], 0.10)),
+    }
+
+
 def build_qss(theme_id):
     """Build the full application stylesheet for the given theme."""
     t = get_theme(theme_id)
@@ -169,12 +182,8 @@ QPushButton#accent {{ background: {accent}; color: {accent_text}; border: none; 
 QPushButton#accent:hover {{ background: {accent_hover}; }}
 QLabel#h1 {{ font-size: 22px; font-weight: 600; }}
 QLabel#muted {{ color: {muted}; }}
-QFrame#card {{ background: {surface}; border: 1px solid {border}; border-radius: 10px; }}
-QFrame#themecard {{
-    background: {surface}; border: 2px solid {border}; border-radius: 10px;
-}}
-QFrame#themecard:hover {{ border-color: {muted}; }}
-QFrame#themecard[selected="true"] {{ border: 2px solid {accent}; }}
+QFrame#card {{ background: {surface}; border: 1px solid {border}; border-radius: 12px; }}
+QLabel#section {{ color: {muted}; font-size: 11px; font-weight: 700; }}
 QTableWidget {{
     background: {table_bg}; gridline-color: {border}; border: 1px solid {border};
     border-radius: 8px;
