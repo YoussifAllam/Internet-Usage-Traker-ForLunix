@@ -22,7 +22,7 @@ tray**, in a clean dark UI.
 | **Usage alerts** | Get notified when today's **total**, or any single **app**, passes a GB threshold you set. |
 | **Export** | Save per-app usage (CSV/JSON) and daily history (CSV) for spreadsheets/reports. |
 | **Settings page** | A dedicated **Settings** tab gathers every option (units, cap, alerts, tracking, startup) with a one-line hint under each. |
-| **One interface selector** | A single **Interface** dropdown in the tab-bar corner drives every tab, so it's always clear which interface you're viewing. |
+| **One interface selector** | A single **Interface** dropdown in the tab-bar corner drives every tab, including a **Total (all)** option that combines every interface. |
 | **Persistent** | Remembers your interface, units, cap, alert, and tray settings between launches. |
 
 > **Per-interface, like vnstat.** Each interface is tracked separately. If the

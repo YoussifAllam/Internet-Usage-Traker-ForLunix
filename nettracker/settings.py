@@ -5,6 +5,7 @@ import os
 
 DEFAULTS = {
     "interface": None,
+    "theme": "midnight",  # color palette id (see themes.py)
     "rate_unit": "bytes",  # "bytes" or "bits"
     "cap_enabled": False,
     "cap_limit_gb": 100.0,

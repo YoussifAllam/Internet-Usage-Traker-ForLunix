@@ -73,6 +73,16 @@ class UsageDB:
         ym = ym or self.this_month()
         return self._rows("day LIKE ? AND iface = ?", (ym + "%", iface or ""))
 
+    def day_totals_all(self, day=None):
+        """Per-app totals for one day across every interface."""
+        day = day or self.today()
+        return self._rows("day = ?", (day,))
+
+    def month_totals_all(self, ym=None):
+        """Per-app totals for one month across every interface."""
+        ym = ym or self.this_month()
+        return self._rows("day LIKE ?", (ym + "%",))
+
     def close(self):
         try:
             self.conn.commit()

@@ -21,6 +21,14 @@ RX_COLOR = QColor("#4fc3f7")  # download – blue
 TX_COLOR = QColor("#81c784")  # upload   – green
 GRID = QColor(255, 255, 255, 22)
 TEXT = QColor("#9aa4b2")
+CHART_BG = QColor("#11151c")  # background behind the charts; theme-updated
+
+
+def set_chart_colors(bg, text):
+    """Repaint the hand-drawn charts in the active theme's colors."""
+    global CHART_BG, TEXT
+    CHART_BG = QColor(bg)
+    TEXT = QColor(text)
 
 
 class LiveGraph(QWidget):
@@ -48,7 +56,7 @@ class LiveGraph(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         rect = self.rect().adjusted(8, 8, -8, -8)
-        p.fillRect(self.rect(), QColor("#11151c"))
+        p.fillRect(self.rect(), CHART_BG)
 
         peak = max(max(self.rx), max(self.tx), 1.0)
         # Round the scale up to something tidy.
@@ -122,7 +130,7 @@ class BarChart(QWidget):
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("#11151c"))
+        p.fillRect(self.rect(), CHART_BG)
         rect = self.rect().adjusted(10, 14, -10, -24)
 
         if not self.items:
@@ -211,7 +219,7 @@ class CapBar(QWidget):
         r = self.rect().adjusted(0, 0, -1, -1)
         radius = r.height() / 2.0
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#11151c"))
+        p.setBrush(CHART_BG)
         p.drawRoundedRect(r, radius, radius)
         if self.fraction > 0:
             fill = QRectF(r)

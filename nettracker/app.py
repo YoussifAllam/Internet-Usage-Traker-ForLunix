@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -29,7 +30,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from . import autostart, export, sources
+from . import autostart, export, sources, themes
 from .nethogs import (
     NethogsMonitor,
     grant_capabilities,
@@ -39,59 +40,18 @@ from .nethogs import (
 from .settings import Settings
 from .usagedb import UsageDB
 from .utils import human_bytes, human_gb, human_rate, set_rate_unit
-from .widgets import RX_COLOR, TX_COLOR, BarChart, CapBar, LiveGraph, make_icon
+from .widgets import (
+    RX_COLOR,
+    TX_COLOR,
+    BarChart,
+    CapBar,
+    LiveGraph,
+    make_icon,
+    set_chart_colors,
+)
 
 CAP_THRESHOLDS = (80, 100)
 TRACK_INTERVAL = 2  # seconds between nethogs samples (also the integration dt)
-
-STYLE = """
-QMainWindow, QWidget { background: #0d1117; color: #e6edf3; }
-QTabWidget::pane { border: 1px solid #222b36; border-radius: 8px; top: -1px; }
-QTabBar::tab {
-    background: #161b22; color: #9aa4b2; padding: 8px 18px;
-    border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px;
-}
-QTabBar::tab:selected { background: #1f6feb; color: white; }
-QTabBar::tab:hover:!selected { background: #1f2630; }
-QComboBox {
-    background: #161b22; border: 1px solid #2a3340; border-radius: 6px;
-    padding: 5px 10px; min-width: 130px;
-}
-QComboBox::drop-down { border: none; }
-QComboBox QAbstractItemView {
-    background: #161b22; selection-background-color: #1f6feb;
-    border: 1px solid #2a3340;
-}
-QPushButton {
-    background: #21262d; border: 1px solid #2a3340; border-radius: 6px;
-    padding: 7px 16px; color: #e6edf3;
-}
-QPushButton:hover { background: #2a313a; }
-QPushButton:disabled { color: #565f6b; background: #161b22; }
-QPushButton#accent { background: #1f6feb; border: none; }
-QPushButton#accent:hover { background: #388bfd; }
-QLabel#h1 { font-size: 22px; font-weight: 600; }
-QLabel#muted { color: #9aa4b2; }
-QFrame#card { background: #161b22; border: 1px solid #222b36; border-radius: 10px; }
-QTableWidget {
-    background: #11151c; gridline-color: #222b36; border: 1px solid #222b36;
-    border-radius: 8px;
-}
-QHeaderView::section {
-    background: #161b22; color: #9aa4b2; padding: 6px; border: none;
-    border-bottom: 1px solid #222b36;
-}
-QTableWidget::item:selected { background: #1f6feb; }
-QMenuBar { background: #0d1117; color: #e6edf3; }
-QMenuBar::item:selected { background: #1f2630; }
-QMenu { background: #161b22; color: #e6edf3; border: 1px solid #2a3340; }
-QMenu::item:selected { background: #1f6feb; }
-QDialog { background: #0d1117; }
-QSpinBox, QDoubleSpinBox {
-    background: #161b22; border: 1px solid #2a3340; border-radius: 6px;
-    padding: 4px 8px; color: #e6edf3;
-}
-"""
 
 
 def _card(*widgets, spacing=2):
@@ -129,6 +89,54 @@ class StatCard(QFrame):
 
     def set_value(self, text):
         self.value.setText(text)
+
+
+class ThemeCard(QFrame):
+    """A clickable palette card: theme name plus a row of color swatches."""
+
+    clicked = pyqtSignal(str)
+
+    def __init__(self, theme):
+        super().__init__()
+        self.theme_id = theme["id"]
+        self.setObjectName("themecard")
+        self.setProperty("selected", False)
+        self.setCursor(Qt.PointingHandCursor)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setSpacing(8)
+
+        name = QLabel(theme["name"])
+        f = QFont()
+        f.setBold(True)
+        name.setFont(f)
+        lay.addWidget(name)
+
+        swatches = QHBoxLayout()
+        swatches.setSpacing(6)
+        swatches.setContentsMargins(0, 0, 0, 0)
+        for color in theme["swatches"]:
+            chip = QFrame()
+            chip.setFixedSize(28, 28)
+            chip.setStyleSheet(
+                f"background: {color}; border-radius: 5px;"
+                "border: 1px solid rgba(255,255,255,0.18);"
+            )
+            swatches.addWidget(chip)
+        swatches.addStretch(1)
+        lay.addLayout(swatches)
+
+    def set_selected(self, selected):
+        self.setProperty("selected", bool(selected))
+        # Re-evaluate the [selected="true"] stylesheet rule.
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.theme_id)
+        super().mousePressEvent(event)
 
 
 class LiveTab(QWidget):
@@ -183,7 +191,8 @@ class LiveTab(QWidget):
 
     def set_iface(self, iface):
         self.iface = iface
-        self.iface_label.setText(f"Interface: {iface}" if iface else "")
+        name = sources.ALL_LABEL if iface == sources.ALL_IFACES else iface
+        self.iface_label.setText(f"Interface: {name}" if iface else "")
         self.prev = None
         self.session_rx = 0
         self.session_tx = 0
@@ -303,8 +312,11 @@ class HistoryTab(QWidget):
             self.status.setText("vnstat is not installed.")
             return
         try:
-            entry = sources.fetch_vnstat(self.iface)
-            hist = sources.parse_history(entry)
+            if self.iface == sources.ALL_IFACES:
+                hist = sources.fetch_all_history()
+            else:
+                entry = sources.fetch_vnstat(self.iface)
+                hist = sources.parse_history(entry)
         except sources.VnstatError as exc:
             self.status.setText(f"vnstat: {exc}")
             return
@@ -403,11 +415,13 @@ class SettingsTab(QWidget):
     cap_settings_changed = pyqtSignal()
     track_apps_changed = pyqtSignal(bool)
     autostart_changed = pyqtSignal(bool)
+    theme_changed = pyqtSignal(str)
 
     def __init__(self, settings):
         super().__init__()
         self.settings = settings
         self._loading = True
+        self._theme_cards = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -426,6 +440,24 @@ class SettingsTab(QWidget):
         title.setObjectName("h1")
         root.addWidget(title)
 
+        # ---- Appearance ----
+        card, lay = self._section("Appearance")
+        lay.addWidget(
+            self._hint("Pick a color palette. Click a card to apply it instantly.")
+        )
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        cols = 3
+        for i, theme in enumerate(themes.THEMES):
+            tcard = ThemeCard(theme)
+            tcard.clicked.connect(self._on_theme)
+            self._theme_cards[theme["id"]] = tcard
+            grid.addWidget(tcard, i // cols, i % cols)
+        for c in range(cols):
+            grid.setColumnStretch(c, 1)
+        lay.addLayout(grid)
+        root.addWidget(card)
+
         # ---- Display ----
         card, lay = self._section("Display")
         self.units = QComboBox()
@@ -433,10 +465,12 @@ class SettingsTab(QWidget):
         self.units.addItem("Bits per second (Mbps)", "bits")
         self.units.currentIndexChanged.connect(self._on_units)
         lay.addWidget(self._row("Speed units", self.units))
-        lay.addWidget(self._hint(
-            "How live download/upload speeds are shown. Bytes/s reflects file "
-            "size; bits/s (Mbps) matches the numbers ISPs advertise."
-        ))
+        lay.addWidget(
+            self._hint(
+                "How live download/upload speeds are shown. Bytes/s reflects file "
+                "size; bits/s (Mbps) matches the numbers ISPs advertise."
+            )
+        )
         root.addWidget(card)
 
         # ---- Per-app tracking ----
@@ -444,11 +478,13 @@ class SettingsTab(QWidget):
         self.track = QCheckBox("Track per-app usage in the background")
         self.track.toggled.connect(self._on_track)
         lay.addWidget(self.track)
-        lay.addWidget(self._hint(
-            "Quietly runs nethogs to record how much each app uploads and "
-            "downloads — the totals you see in the Apps tab. Requires the "
-            "one-time access grant on the Processes tab."
-        ))
+        lay.addWidget(
+            self._hint(
+                "Quietly runs nethogs to record how much each app uploads and "
+                "downloads — the totals you see in the Apps tab. Requires the "
+                "one-time access grant on the Processes tab."
+            )
+        )
         root.addWidget(card)
 
         # ---- Monthly data cap ----
@@ -456,10 +492,12 @@ class SettingsTab(QWidget):
         self.cap_enable = QCheckBox("Enable a monthly data cap")
         self.cap_enable.toggled.connect(self._on_cap)
         lay.addWidget(self.cap_enable)
-        lay.addWidget(self._hint(
-            "Track usage against a monthly allowance. The History tab shows a "
-            "progress bar and a forecast of when you'll reach it."
-        ))
+        lay.addWidget(
+            self._hint(
+                "Track usage against a monthly allowance. The History tab shows a "
+                "progress bar and a forecast of when you'll reach it."
+            )
+        )
         self.cap_limit = QDoubleSpinBox()
         self.cap_limit.setRange(0.1, 1_000_000.0)
         self.cap_limit.setDecimals(1)
@@ -471,10 +509,12 @@ class SettingsTab(QWidget):
         self.cap_day.setRange(1, 28)
         self.cap_day.valueChanged.connect(self._on_cap)
         lay.addWidget(self._row("Billing day", self.cap_day))
-        lay.addWidget(self._hint(
-            "The day each month your billing cycle resets (1–28). Usage is "
-            "counted from this day."
-        ))
+        lay.addWidget(
+            self._hint(
+                "The day each month your billing cycle resets (1–28). Usage is "
+                "counted from this day."
+            )
+        )
         root.addWidget(card)
 
         # ---- Usage alerts ----
@@ -483,18 +523,22 @@ class SettingsTab(QWidget):
         self.daily_enable.toggled.connect(self._on_cap)
         self.daily_gb = self._gb_spin()
         lay.addWidget(self._row2(self.daily_enable, self.daily_gb))
-        lay.addWidget(self._hint(
-            "Sends a notification once a day when today's total usage passes "
-            "this many gigabytes."
-        ))
+        lay.addWidget(
+            self._hint(
+                "Sends a notification once a day when today's total usage passes "
+                "this many gigabytes."
+            )
+        )
         self.app_enable = QCheckBox("Alert on heavy app usage above")
         self.app_enable.toggled.connect(self._on_cap)
         self.app_gb = self._gb_spin()
         lay.addWidget(self._row2(self.app_enable, self.app_gb))
-        lay.addWidget(self._hint(
-            "Notifies you when any single app passes this many gigabytes today "
-            "(needs per-app tracking on)."
-        ))
+        lay.addWidget(
+            self._hint(
+                "Notifies you when any single app passes this many gigabytes today "
+                "(needs per-app tracking on)."
+            )
+        )
         root.addWidget(card)
 
         # ---- Startup & tray ----
@@ -502,28 +546,30 @@ class SettingsTab(QWidget):
         self.autostart = QCheckBox("Launch NetTracker on login")
         self.autostart.toggled.connect(self._on_autostart)
         lay.addWidget(self.autostart)
-        lay.addWidget(self._hint(
-            "Starts automatically when you log in, so usage is tracked "
-            "continuously without opening it by hand."
-        ))
+        lay.addWidget(
+            self._hint(
+                "Starts automatically when you log in, so usage is tracked "
+                "continuously without opening it by hand."
+            )
+        )
         self.start_min = QCheckBox("Start minimized to the tray")
-        self.start_min.toggled.connect(
-            lambda v: self._save("start_minimized", v)
-        )
+        self.start_min.toggled.connect(lambda v: self._save("start_minimized", v))
         lay.addWidget(self.start_min)
-        lay.addWidget(self._hint(
-            "Opens hidden in the system tray instead of showing the window. "
-            "Click the tray icon to bring it up."
-        ))
-        self.close_tray = QCheckBox("Keep running in the tray when closed")
-        self.close_tray.toggled.connect(
-            lambda v: self._save("close_to_tray", v)
+        lay.addWidget(
+            self._hint(
+                "Opens hidden in the system tray instead of showing the window. "
+                "Click the tray icon to bring it up."
+            )
         )
+        self.close_tray = QCheckBox("Keep running in the tray when closed")
+        self.close_tray.toggled.connect(lambda v: self._save("close_to_tray", v))
         lay.addWidget(self.close_tray)
-        lay.addWidget(self._hint(
-            "Closing the window hides it to the tray instead of quitting. Use "
-            "File ▸ Quit or the tray menu to exit completely."
-        ))
+        lay.addWidget(
+            self._hint(
+                "Closing the window hides it to the tray instead of quitting. Use "
+                "File ▸ Quit or the tray menu to exit completely."
+            )
+        )
         root.addWidget(card)
 
         root.addStretch(1)
@@ -585,6 +631,7 @@ class SettingsTab(QWidget):
 
     def _load(self):
         s = self.settings
+        self._highlight_theme(s.get("theme"))
         idx = self.units.findData(s.get("rate_unit"))
         self.units.setCurrentIndex(idx if idx >= 0 else 0)
         self.track.setChecked(bool(s.get("track_apps")))
@@ -598,6 +645,17 @@ class SettingsTab(QWidget):
         self.autostart.setChecked(autostart.is_enabled())
         self.start_min.setChecked(bool(s.get("start_minimized")))
         self.close_tray.setChecked(bool(s.get("close_to_tray")))
+
+    def _highlight_theme(self, theme_id):
+        if theme_id not in self._theme_cards:
+            theme_id = themes.DEFAULT_THEME
+        for tid, card in self._theme_cards.items():
+            card.set_selected(tid == theme_id)
+
+    def _on_theme(self, theme_id):
+        self._highlight_theme(theme_id)
+        self.settings.set("theme", theme_id)
+        self.theme_changed.emit(theme_id)
 
     def _on_units(self):
         if self._loading:
@@ -841,7 +899,14 @@ class AppsTab(QWidget):
         self.reload()
 
     def reload(self):
-        if self.period.currentData() == "month":
+        month = self.period.currentData() == "month"
+        if self.iface == sources.ALL_IFACES:
+            rows = (
+                self.usage.month_totals_all()
+                if month
+                else self.usage.day_totals_all()
+            )
+        elif month:
             rows = self.usage.month_totals(self.iface)
         else:
             rows = self.usage.day_totals(self.iface)
@@ -925,7 +990,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("NetTracker — Internet Usage")
         self.resize(940, 700)
-        self.setStyleSheet(STYLE)
+        self._apply_theme(self.settings.get("theme"))
         self.icon = make_icon(64)
         self.setWindowIcon(self.icon)
 
@@ -967,6 +1032,7 @@ class MainWindow(QMainWindow):
         self.settings_tab.cap_settings_changed.connect(self._on_cap_settings)
         self.settings_tab.track_apps_changed.connect(self._set_tracking)
         self.settings_tab.autostart_changed.connect(self._set_autostart)
+        self.settings_tab.theme_changed.connect(self._apply_theme)
 
         # Persist an icon file and expose whether we should launch hidden.
         autostart.save_icon(self.icon)
@@ -1046,6 +1112,21 @@ class MainWindow(QMainWindow):
 
     # ---- handlers ----------------------------------------------------
 
+    def _apply_theme(self, theme_id):
+        self.setStyleSheet(themes.build_qss(theme_id))
+        bg, text, _ = themes.chart_colors(theme_id)
+        set_chart_colors(bg, text)
+        # Repaint the hand-drawn charts (skipped on the first call, before the
+        # tabs are built).
+        if hasattr(self, "live"):
+            for w in (
+                self.live.graph,
+                self.history.daily_chart,
+                self.history.monthly_chart,
+                self.history.cap_bar,
+            ):
+                w.update()
+
     def _set_units(self, mode):
         set_rate_unit(mode)
         self.settings.set("rate_unit", mode)
@@ -1071,6 +1152,7 @@ class MainWindow(QMainWindow):
         interfaces = sources.list_interfaces()
         self.iface_combo.blockSignals(True)
         self.iface_combo.clear()
+        self.iface_combo.addItem("Total (all)", sources.ALL_IFACES)
         for info in interfaces:
             suffix = "" if info["is_up"] else f"  ({info['state']})"
             self.iface_combo.addItem(info["name"] + suffix, info["name"])
@@ -1122,7 +1204,11 @@ class MainWindow(QMainWindow):
         iface = self.live.iface
         if not iface or not has_capabilities():
             return
-        self.monitor = NethogsMonitor(iface=iface, delay=TRACK_INTERVAL, parent=self)
+        # "Total" watches every device (nethogs with no interface argument).
+        mon_iface = None if iface == sources.ALL_IFACES else iface
+        self.monitor = NethogsMonitor(
+            iface=mon_iface, delay=TRACK_INTERVAL, parent=self
+        )
         self.monitor.updated.connect(self._on_samples)
         self.monitor.error.connect(self._on_track_error)
         self.monitor.start()
@@ -1179,7 +1265,11 @@ class MainWindow(QMainWindow):
         store = dict(self.settings.get("app_notified") or {})
         done = list(store.get(day, []))
         changed = False
-        for row in self.usage.day_totals(self.live.iface):
+        if self.live.iface == sources.ALL_IFACES:
+            rows = self.usage.day_totals_all()
+        else:
+            rows = self.usage.day_totals(self.live.iface)
+        for row in rows:
             if row["total"] >= threshold and row["app"] not in done:
                 done.append(row["app"])
                 changed = True
@@ -1240,8 +1330,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if (
             not self._really_quit
-            and self.tray is not None
-            and self.settings.get("close_to_tray")
+            and self.tray is not None  # noqa
+            and self.settings.get("close_to_tray")  # noqa
         ):
             event.ignore()
             self.hide()

@@ -6,6 +6,10 @@ import subprocess
 
 SYS_NET = "/sys/class/net"
 
+# Sentinel selecting the combined total of every interface.
+ALL_IFACES = "__all__"
+ALL_LABEL = "All interfaces"
+
 
 def list_interfaces():
     """Return a list of dicts for real (non-loopback) interfaces.
@@ -30,12 +34,34 @@ def list_interfaces():
 
 def read_counters(iface):
     """Return (rx_bytes, tx_bytes) for an interface, or (None, None)."""
+    if iface == ALL_IFACES:
+        return read_total_counters()
     rx = _read_text(os.path.join(SYS_NET, iface, "statistics", "rx_bytes"))
     tx = _read_text(os.path.join(SYS_NET, iface, "statistics", "tx_bytes"))
     try:
         return int(rx), int(tx)
     except (TypeError, ValueError):
         return None, None
+
+
+def read_total_counters():
+    """Summed (rx_bytes, tx_bytes) across every real interface."""
+    total_rx = total_tx = 0
+    any_ok = False
+    for info in list_interfaces():
+        rx = _read_text(
+            os.path.join(SYS_NET, info["name"], "statistics", "rx_bytes")
+        )
+        tx = _read_text(
+            os.path.join(SYS_NET, info["name"], "statistics", "tx_bytes")
+        )
+        try:
+            total_rx += int(rx)
+            total_tx += int(tx)
+            any_ok = True
+        except (TypeError, ValueError):
+            continue
+    return (total_rx, total_tx) if any_ok else (None, None)
 
 
 def _read_text(path):
@@ -126,6 +152,72 @@ def parse_history(entry):
         },
         "today": today,
         "this_month": this_month,
+        "days": days,
+        "months": months,
+        "top": top,
+    }
+
+
+def fetch_all_history():
+    """Merged history across every interface in the vnstat database."""
+    cmd = ["vnstat", "--json"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise VnstatError(str(exc))
+    if out.returncode != 0:
+        raise VnstatError(out.stderr.strip() or "vnstat failed")
+    try:
+        data = json.loads(out.stdout)
+    except json.JSONDecodeError as exc:
+        raise VnstatError(f"bad JSON from vnstat: {exc}")
+    interfaces = data.get("interfaces", [])
+    if not interfaces:
+        raise VnstatError("vnstat has no data yet")
+    return merge_histories([parse_history(e) for e in interfaces])
+
+
+def _merge_rows(rowlists):
+    """Sum rows from several interfaces, keyed by date, sorted ascending."""
+    acc = {}
+    for rows in rowlists:
+        for r in rows:
+            key = r["date"]
+            slot = acc.setdefault(
+                key,
+                {"label": r["label"], "date": key, "rx": 0, "tx": 0, "total": 0},
+            )
+            slot["rx"] += r["rx"]
+            slot["tx"] += r["tx"]
+            slot["total"] += r["total"]
+    return [
+        acc[k]
+        for k in sorted(
+            acc, key=lambda t: tuple(x if x is not None else 0 for x in t)
+        )
+    ]
+
+
+def merge_histories(hists):
+    """Combine several parse_history() dicts into one aggregate dict."""
+    days = _merge_rows([h["days"] for h in hists])
+    months = _merge_rows([h["months"] for h in hists])
+    top = sorted(
+        _merge_rows([h["top"] for h in hists]),
+        key=lambda r: r["total"],
+        reverse=True,
+    )[:10]
+    total_rx = sum(h["total"]["rx"] for h in hists)
+    total_tx = sum(h["total"]["tx"] for h in hists)
+    return {
+        "name": ALL_LABEL,
+        "total": {
+            "rx": total_rx,
+            "tx": total_tx,
+            "total": total_rx + total_tx,
+        },
+        "today": days[-1] if days else None,
+        "this_month": months[-1] if months else None,
         "days": days,
         "months": months,
         "top": top,
